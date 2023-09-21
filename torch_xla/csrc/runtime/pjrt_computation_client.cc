@@ -93,6 +93,13 @@ std::vector<std::string> PjRtComputationClient::PjRtDevicesToString(
   return strs;
 }
 
+xla::GpuAllocatorConfig GetGPUAllocatorConfig() {
+  double memory_fraction = sys_util::GetEnvDouble(env::KEnvPjRtMemFraction, 0.75);
+  xla::GpuAllocatorConfig config;
+  config.memory_fraction = memory_fraction;
+  return config;
+}
+
 PjRtComputationClient::PjRtComputationClient() {
   std::string device_type = sys_util::GetEnvString(env::kEnvPjRtDevice, "");
   if (device_type == "CPU") {
@@ -145,9 +152,10 @@ PjRtComputationClient::PjRtComputationClient() {
         return distributed_client->KeyValueSet(absl::StrCat(key_prefix, k), v);
       };
     }
+    auto gpu_alloc_cfg = GetGPUAllocatorConfig();
     client_ = std::move(xla::GetStreamExecutorGpuClient(
                             /*asynchronous=*/async,
-                            /*allocator_config=*/xla::GpuAllocatorConfig{},
+                            /*allocator_config=*/gpu_alloc_cfg,
                             /*node_id=*/rank,
                             /*num_nodes=*/world_size,
                             /*allowed_devices=*/allowed_devices,
