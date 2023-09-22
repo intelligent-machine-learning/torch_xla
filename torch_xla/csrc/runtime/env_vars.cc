@@ -22,7 +22,7 @@ const char* const kEnvPjRtLocalRank = "PJRT_LOCAL_RANK";
 const char* const kEnvPjRtWorldSize = "PJRT_WORLD_SIZE";
 const char* const kEnvPjRtRank = "PJRT_RANK";
 const char* const kEnvPjRtGroupRank = "PJRT_GROUP_RANK";
-const char* const KEnvPjRtMemFraction = "PJRT_MEM_FRACTION";
+const char* const KEnvGPUMemFraction = "GPU_MEM_FRACTION";
 
 }  // namespace env
 }  // namespace runtime

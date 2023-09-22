@@ -94,7 +94,7 @@ std::vector<std::string> PjRtComputationClient::PjRtDevicesToString(
 }
 
 xla::GpuAllocatorConfig GetGPUAllocatorConfig() {
-  double memory_fraction = sys_util::GetEnvDouble(env::KEnvPjRtMemFraction, 0.75);
+  double memory_fraction = sys_util::GetEnvDouble(env::KEnvGPUMemFraction, 0.75);
   xla::GpuAllocatorConfig config;
   config.memory_fraction = memory_fraction;
   return config;

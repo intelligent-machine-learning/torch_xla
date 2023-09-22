@@ -32,7 +32,7 @@ extern const char* const kEnvPjRtLocalRank;
 extern const char* const kEnvPjRtWorldSize;
 extern const char* const kEnvPjRtRank;
 extern const char* const kEnvPjRtGroupRank;
-extern const char* const KEnvPjRtMemFraction;
+extern const char* const KEnvGPUMemFraction;
 
 }  // namespace env
 }  // namespace runtime
