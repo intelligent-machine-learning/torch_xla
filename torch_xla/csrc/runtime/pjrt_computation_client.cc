@@ -105,6 +105,20 @@ std::vector<std::string> PjRtComputationClient::PjRtDevicesToString(
   return strs;
 }
 
+xla::GpuAllocatorConfig GetGpuAllocatorConfig() {
+  xla::GpuAllocatorConfig config;
+  xla::GpuAllocatorConfig::Kind kind =
+      static_cast<xla::GpuAllocatorConfig::Kind>(
+          sys_util::GetEnvInt("XLA_GPU_MEMORY_ALLOCATOR_KIND", 2));
+  config.kind = kind;
+  config.memory_fraction =
+      sys_util::GetEnvDouble("XLA_GPU_MEMORY_FRACTION", 0.9);
+  config.preallocate = sys_util::GetEnvBool("XLA_GPU_MEMORY_PREALLOCATE", true);
+  config.garbage_collection =
+      sys_util::GetEnvBool("XLA_GPU_MEMORY_GARBAGE_COLLECTION", false);
+  return config;
+}
+
 PjRtComputationClient::PjRtComputationClient() {
   std::string device_type = sys_util::GetEnvString(env::kEnvPjRtDevice, "");
   if (device_type == "CPU") {
