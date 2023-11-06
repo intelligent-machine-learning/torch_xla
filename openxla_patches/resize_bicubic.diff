@@ -217,10 +217,10 @@ index f75fe6510..b2eed355a 100644
    RegisterMatmulCustomCalls(registry);
 diff --git a/xla/service/gpu/runtime/resize_bicubic.cc b/xla/service/gpu/runtime/resize_bicubic.cc
 new file mode 100644
-index 000000000..10abfb088
+index 000000000..22bd7faa6
 --- /dev/null
 +++ b/xla/service/gpu/runtime/resize_bicubic.cc
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,88 @@
 +/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
 +
 +Licensed under the Apache License, Version 2.0 (the "License");
@@ -249,7 +249,6 @@ index 000000000..10abfb088
 +#include "xla/service/gpu/runtime/resize_bicubic_kernel.h"
 +// #include "xla/runtime/custom_call_registry.h"
 +
-+#include "xla/service/gpu/gpu_device_info.h"
 +#include "xla/service/gpu/runtime/support.h"
 +#include "xla/service/service_executable_run_options.h"
 +#include "xla/xla_data.pb.h"
