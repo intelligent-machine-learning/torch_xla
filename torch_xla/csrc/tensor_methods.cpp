@@ -122,12 +122,12 @@
 #include "torch_xla/csrc/ops/triangular_solve.h"
 #include "torch_xla/csrc/ops/uniform.h"
 #include "torch_xla/csrc/ops/unsqueeze.h"
+#include "torch_xla/csrc/ops/upsample_bicubic2d.h"
+#include "torch_xla/csrc/ops/upsample_bicubic2d_backward.h"
 #include "torch_xla/csrc/ops/upsample_bilinear2d.h"
 #include "torch_xla/csrc/ops/upsample_bilinear2d_backward.h"
 #include "torch_xla/csrc/ops/upsample_nearest2d.h"
 #include "torch_xla/csrc/ops/upsample_nearest2d_backward.h"
-#include "torch_xla/csrc/ops/upsample_bicubic2d.h"
-#include "torch_xla/csrc/ops/upsample_bicubic2d_backward.h"
 #include "torch_xla/csrc/ops/user_computation.h"
 #include "torch_xla/csrc/ops/var.h"
 #include "torch_xla/csrc/ops/var_mean.h"
@@ -2764,8 +2764,8 @@ XLATensorPtr upsample_nearest2d_backward(const XLATensorPtr& grad_output,
 }
 
 XLATensorPtr upsample_bicubic2d(const XLATensorPtr& input,
-                                 std::vector<int64_t> output_size,
-                                 bool align_corners) {
+                                std::vector<int64_t> output_size,
+                                bool align_corners) {
   return input->CreateFrom(torch::lazy::MakeNode<UpsampleBicubic>(
       input->GetIrValue(), std::move(output_size), align_corners));
 }

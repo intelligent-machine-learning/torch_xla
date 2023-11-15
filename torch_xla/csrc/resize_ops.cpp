@@ -319,7 +319,7 @@ xla::XlaOp LowerBackward2d(const std::string& target, xla::XlaOp input,
   if (target == "ResizeBicubicGrad") {
     return xla::CustomCall(
         input.builder(), "__gpu$ResizeBicubicGrad",
-        /*operands=*/{input},  // grad_output
+        /*operands=*/{input},    // grad_output
         /*shape=*/output_shape,  // grad_input
         /*opaque=*/
         absl::StrCat("{ align_corners = ", align_corners ? "true" : "false",

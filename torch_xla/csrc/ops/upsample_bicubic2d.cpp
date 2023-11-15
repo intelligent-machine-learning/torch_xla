@@ -8,22 +8,22 @@
 namespace torch_xla {
 
 UpsampleBicubic::UpsampleBicubic(const torch::lazy::Value& input,
-                                   std::vector<int64_t> output_size,
-                                   bool align_corners)
-    : XlaNode(torch::lazy::OpKind(at::aten::upsample_bicubic2d), {input},
-              [&]() {
-                return resize::GetForwardOutputShape2d(GetXlaShape(input),
-                                                       output_size);
-              },
-              /*num_outputs=*/1,
-              torch::lazy::MHash(output_size, align_corners)),
+                                 std::vector<int64_t> output_size,
+                                 bool align_corners)
+    : XlaNode(
+          torch::lazy::OpKind(at::aten::upsample_bicubic2d), {input},
+          [&]() {
+            return resize::GetForwardOutputShape2d(GetXlaShape(input),
+                                                   output_size);
+          },
+          /*num_outputs=*/1, torch::lazy::MHash(output_size, align_corners)),
       output_size_(std::move(output_size)),
       align_corners_(align_corners) {}
 
 torch::lazy::NodePtr UpsampleBicubic::Clone(
     torch::lazy::OpList operands) const {
   return torch::lazy::MakeNode<UpsampleBicubic>(operands.at(0), output_size_,
-                                                 align_corners_);
+                                                align_corners_);
 }
 
 XlaOpVector UpsampleBicubic::Lower(LoweringContext* loctx) const {

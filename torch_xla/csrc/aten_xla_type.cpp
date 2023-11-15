@@ -3251,7 +3251,8 @@ at::Tensor XLANativeFunctions::upsample_bicubic2d(
     c10::optional<double> scales_h, c10::optional<double> scales_w) {
   TORCH_LAZY_FN_COUNTER("xla::");
   XLATensorPtr self_tensor = bridge::GetXlaTensor(self);
-  XlaDeviceType hw_type = static_cast<XlaDeviceType>(self_tensor->GetDevice().type());
+  XlaDeviceType hw_type =
+      static_cast<XlaDeviceType>(self_tensor->GetDevice().type());
   // NOT GPU
   if (hw_type != XlaDeviceType::CUDA && hw_type != XlaDeviceType::GPU) {
     return at::native::call_fallback_fn<
