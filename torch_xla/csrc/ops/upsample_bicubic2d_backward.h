@@ -10,8 +10,8 @@ namespace torch_xla {
 class UpsampleBicubicBackward : public XlaNode {
  public:
   UpsampleBicubicBackward(const torch::lazy::Value& input,
-                           std::vector<int64_t> output_size,
-                           std::vector<int64_t> input_size, bool align_corners);
+                          std::vector<int64_t> output_size,
+                          std::vector<int64_t> input_size, bool align_corners);
 
   torch::lazy::NodePtr Clone(torch::lazy::OpList operands) const override;
 
