@@ -47,7 +47,7 @@ http_archive(
     ],
     strip_prefix = "xla-4f8381651977dff16b1d86bb4b198eb733c5f478",
     urls = [
-        "https://github.com/openxla/xla/archive/4f8381651977dff16b1d86bb4b198eb733c5f478.tar.gz",
+        "https://github.com/intelligent-machine-learning/xla/archive/4f8381651977dff16b1d86bb4b198eb733c5f478.tar.gz",
     ],
 )
 
