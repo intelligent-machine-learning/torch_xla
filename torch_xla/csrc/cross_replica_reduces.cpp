@@ -265,7 +265,8 @@ SendResult BuildSendWithToken(xla::XlaOp input, xla::XlaOp token,
   XLA_CHECK(send_done_instr->operand_ids().size() == 1)
       << "send done operands size must be equal to 1";
   auto send_operand_id = send_done_instr->operand_ids(0);
-  auto* send_instr = GetInstructionByHandle(result_token.builder(), send_operand_id);
+  auto* send_instr = builder_friend.GetInstructionByHandle(
+      result_token.builder(), send_operand_id);
   auto* frontend_attributes = send_instr->mutable_frontend_attributes();
   auto p2p_channels_map = lynx::P2PChannelsManager::GetInstance();
   auto src_tgt_pair = (*(p2p_channels_map->GetChannelsMap()))[channel_id];
@@ -291,11 +292,13 @@ RecvResult BuildRecvWithToken(xla::XlaOp token, const xla::Shape& recv_shape,
   xla::XlaOp recv = xla::RecvWithToken(token, recv_shape, channel_handle);
 
   // lynx set frontend_attributes of recv op
+  xla::internal::XlaBuilderFriend builder_friend;
   auto* recv_done_instr = builder_friend.GetInstruction(recv);
   XLA_CHECK(recv_done_instr->operand_ids().size() == 1)
       << "recv done operands size must be equal to 1";
   auto recv_operand_id = recv_done_instr->operand_ids(0);
-  auto* recv_instr = GetInstructionByHandle(recv.builder(), recv_operand_id);
+  auto* recv_instr =
+      builder_friend.GetInstructionByHandle(recv.builder(), recv_operand_id);
   auto* frontend_attributes = recv_instr->mutable_frontend_attributes();
   auto p2p_channels_map = lynx::P2PChannelsManager::GetInstance();
   auto src_tgt_pair = (*(p2p_channels_map->GetChannelsMap()))[channel_id];
