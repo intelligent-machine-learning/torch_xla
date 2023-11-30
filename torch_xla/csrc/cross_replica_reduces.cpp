@@ -274,8 +274,8 @@ SendResult BuildSendWithToken(xla::XlaOp input, xla::XlaOp token,
   XLA_CHECK_OK(send_lookup_status) << "lookup send instruction failed";
   auto send_instr = send_lookup_status.value();
   auto* frontend_attributes = send_instr->mutable_frontend_attributes();
-  auto p2p_channels_map = lynx::Singleton<lynx::P2PChannelsMap>::GetInstance();
-  auto src_tgt_pair = p2p_channels_map[channel_id];
+  auto p2p_channels_map = lynx::Singleton<lynx::P2PChannelsManager>::GetInstance();
+  auto src_tgt_pair = (*(p2p_channels_map->GetChannelsMap()))[channel_id];
   std::stringstream ss;
   ss << "{{" << src.first << "," << src.second << "}}";
   // _xla_send_recv_source_target_pairs="{{0, 1}}"
@@ -312,8 +312,8 @@ RecvResult BuildRecvWithToken(xla::XlaOp token, const xla::Shape& recv_shape,
       << "lookup recv instruction failed";
   auto recv_instr = recv_lookup_status.value();
   auto* frontend_attributes = recv_instr->mutable_frontend_attributes();
-  auto p2p_channels_map = lynx::Singleton<lynx::P2PChannelsMap>::GetInstance();
-  auto src_tgt_pair = p2p_channels_map[channel_id];
+  auto p2p_channels_map = lynx::Singleton<lynx::P2PChannelsManager>::GetInstance();
+  auto src_tgt_pair = (*(p2p_channels_map->GetChannelsMap()))[channel_id];
   std::stringstream ss;
   ss << "{{" << src.first << "," << src.second << "}}";
   // _xla_send_recv_source_target_pairs="{{0, 1}}"

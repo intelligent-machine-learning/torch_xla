@@ -4,8 +4,17 @@
 #include <utility>
 
 namespace lynx {
-class P2PChannelsMap
-    : public std::unordered_map<int64_t, std::pair<int64_t, int64_t>> {}
+
+struct P2PChannelsManager : public Singleton<P2PChannelsManager> {
+ public:
+  std::unordered_map < int64_t, std::pair<int64_t, int64_t>* GetChannelsMap() {
+    return &map_;
+  }
+
+ private:
+  std::unordered_map < int64_t, std::pair<int64_t, int64_t> map_;
+  friend class Singleton<P2PChannelsManager>;
+};
 
 }  // namespace lynx
 

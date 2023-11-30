@@ -1887,14 +1887,14 @@ void InitXlaModuleBindings(py::module m) {
   });
   m.def("_set_send_recv_channels", [](py::dict channel_pairs) {
     auto p2p_channels_map =
-        lynx::Singleton<lynx::P2PChannelsMap>::GetInstance();
+        lynx::Singleton<lynx::P2PChannelsManager>::GetInstance();
     for (const auto& item : channel_pairs) {
       int64_t channel_id = item.first.cast<int64_t>();
       const auto& src_tgt_list = item.second.cast<py::list>();
       std::pair<int64_t, int64_t> src_tgt_pair;
       src_tgt_pair.first = src_tgt_list[0].cast<int64_t>();
       src_tgt_pair.second = src_tgt_list[1].cast<int64_t>();
-      (*p2p_channels_map)[channel_id] = src_tgt_pair;
+      (*(p2p_channels_map->GetChannelsMap()))[channel_id] = src_tgt_pair;
     }
     return true;
   });
