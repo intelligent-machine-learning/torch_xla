@@ -263,7 +263,7 @@ SendResult BuildSendWithToken(xla::XlaOp input, xla::XlaOp token,
   auto send_done_lookup_status =
       result_token.builder()->LookUpInstruction(result_token);
   auto send_done_instr = send_done_lookup_status.value();
-  XLA_CHECK(send_done_instr.operand_ids().size() == 1)
+  XLA_CHECK(send_done_instr->operand_ids().size() == 1)
       << "send done operands size must be equal to 1";
   auto send_operand_id = send_done_instr->operand_ids(0);
   auto send_lookup_status =
@@ -296,7 +296,7 @@ RecvResult BuildRecvWithToken(xla::XlaOp token, const xla::Shape& recv_shape,
   // lynx set frontend_attributes of recv op
   auto recv_done_lookup_status = recv.builder()->LookUpInstruction(recv);
   auto recv_done_instr = recv_done_lookup_status.value();
-  XLA_CHECK(recv_done_instr.operand_ids().size() == 1)
+  XLA_CHECK(recv_done_instr->operand_ids().size() == 1)
       << "recv done operands size must be equal to 1";
   auto recv_operand_id = recv_done_instr->operand_ids(0);
   auto recv_lookup_status =
