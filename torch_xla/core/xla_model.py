@@ -709,6 +709,9 @@ def recv(output, channel_id):
   torch_xla._XLAC._set_all_reduce_token(devctx.device, new_token)
   return result
 
+def set_send_recv_channels(channel_pairs):
+  return torch_xla._XLAC._set_send_recv_channels(channel_pairs)
+
 
 def reduce_scatter(reduce_type,
                    input,

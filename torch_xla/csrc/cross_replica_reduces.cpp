@@ -3,8 +3,11 @@
 #include <torch/csrc/lazy/core/util.h>
 
 #include <map>
-
+#include <sstream>
+#include <string>
 #include "torch/csrc/lazy/core/util.h"
+#include "torch_xla/csrc/common/singleton.h"
+#include "torch_xla/csrc/common/lynx_types.h"
 #include "torch_xla/csrc/aten_xla_bridge.h"
 #include "torch_xla/csrc/convert_ops.h"
 #include "torch_xla/csrc/device.h"
@@ -254,7 +257,31 @@ SendResult BuildSendWithToken(xla::XlaOp input, xla::XlaOp token,
   xla::ChannelHandle channel_handle;
   channel_handle.set_handle(channel_id);
   channel_handle.set_type(xla::ChannelHandle::DEVICE_TO_DEVICE);
+  // result_token alias to "send_done"
   xla::XlaOp result_token = xla::SendWithToken(input, token, channel_handle);
+
+  // lynx set frontend_attributes of send op
+  StatusOr<const HloInstructionProto*> send_done_lookup_status =
+      result_token.builder()->LookUpInstruction(result_token);
+  XLA_CHECK_OK(send_done_lookup_status)
+      << "lookup send done instruction failed";
+  auto send_done_instr = send_done_lookup_status.value();
+  XLA_CHECK(send_done_instr.operand_ids().size() == 1)
+      << "send done operands size must be equal to 1";
+  auto send_operand_id = send_done_instr->operand_ids(0);
+  StatusOr<const HloInstructionProto*> send_lookup_status =
+      result_token.builder()->LookUpMutableInstruction(send_operand_id);
+  XLA_CHECK_OK(send_lookup_status) << "lookup send instruction failed";
+  auto send_instr = send_lookup_status.value();
+  auto* frontend_attributes = send_instr->mutable_frontend_attributes();
+  auto p2p_channels_map = lynx::Singleton<lynx::P2PChannelsMap>::GetInstance();
+  auto src_tgt_pair = p2p_channels_map[channel_id];
+  std::stringstream ss;
+  ss << "{{" << src.first << "," << src.second << "}}";
+  // _xla_send_recv_source_target_pairs="{{0, 1}}"
+  (*frontend_attributes->mutable_map())[kSendRecvSourceTargetPairsAttr] =
+      ss.str();
+
   // Bind input into the result, so that the caller can depend on the result.
   // This can enable building the `send` op into the graph when the token
   // is ignored by some caller like `torch.distributed`.
@@ -269,6 +296,29 @@ RecvResult BuildRecvWithToken(xla::XlaOp token, const xla::Shape& recv_shape,
   channel_handle.set_handle(channel_id);
   channel_handle.set_type(xla::ChannelHandle::DEVICE_TO_DEVICE);
   xla::XlaOp recv = xla::RecvWithToken(token, recv_shape, channel_handle);
+
+  // lynx set frontend_attributes of recv op
+  StatusOr<const HloInstructionProto*> recv_done_lookup_status =
+      recv.builder()->LookUpInstruction(recv);
+  XLA_CHECK_OK(recv_done_lookup_status)
+      << "lookup recv done instruction failed";
+  auto recv_done_instr = recv_done_lookup_status.value();
+  XLA_CHECK(recv_done_instr.operand_ids().size() == 1)
+      << "recv done operands size must be equal to 1";
+  auto recv_operand_id = recv_done_instr->operand_ids(0);
+  StatusOr<const HloInstructionProto*> recv_lookup_status =
+      recv.builder()->LookUpMutableInstruction(recv_operand_id);
+  XLA_CHECK_OK(recv_lookup_status)
+      << "lookup recv instruction failed";
+  auto recv_instr = recv_lookup_status.value();
+  auto* frontend_attributes = recv_instr->mutable_frontend_attributes();
+  auto p2p_channels_map = lynx::Singleton<lynx::P2PChannelsMap>::GetInstance();
+  auto src_tgt_pair = p2p_channels_map[channel_id];
+  std::stringstream ss;
+  ss << "{{" << src.first << "," << src.second << "}}";
+  // _xla_send_recv_source_target_pairs="{{0, 1}}"
+  (*frontend_attributes->mutable_map())[kSendRecvSourceTargetPairsAttr] = ss.str();
+
   xla::XlaOp result = xla::GetTupleElement(recv, 0);
   xla::XlaOp new_token = xla::GetTupleElement(recv, 1);
   return {result, new_token};
