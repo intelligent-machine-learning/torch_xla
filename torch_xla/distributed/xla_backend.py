@@ -30,17 +30,21 @@ class P2PChannelManager(object):
   def __init__(self):
     self.map = {}
     self.channel_to_src_tgt = {}
-    self.id_counter = 0
+    self.id_counter = {}
 
   def next_channel_id(self, src_rank, dst_rank):
-    self.id_counter += 1
-    channel_id = self.id_counter
+    if (src_rank, dst_rank) not in self.id_counter:
+      self.id_counter[src_rank, dst_rank] = [0]
+    else:
+      count = self.id_counter[src_rank, dst_rank][-1]
+      self.id_counter[src_rank, dst_rank].append(count+1)
+    count = self.id_counter[src_rank, dst_rank][-1]
+    channel_id = self._hash((src_rank, dst_rank, count))
     if (src_rank, dst_rank) not in self.map:
       self.map[(src_rank, dst_rank)] = [channel_id,]
     else:
       self.map[(src_rank, dst_rank)].append(channel_id)
     self.channel_to_src_tgt[channel_id] = src_rank, dst_rank
-    xm.set_send_recv_channels({channel_id: [src_rank, dst_rank]})
     return channel_id
 
   @classmethod
@@ -50,6 +54,8 @@ class P2PChannelManager(object):
     else:
       return P2PChannelManager._instance
 
+  def _hash(self, src_rank, dst_rank, count):
+    return src_rank * 100000 * 100000 + dst_rank * 100000 + count
 
 def _ret_work(ret):
   fut = torch.futures.Future()
@@ -180,6 +186,7 @@ class ProcessGroupXla(ProcessGroup):
   def make_send_channel_id(self, dst_rank, tag):
     src_rank = xm.get_ordinal()
     channel_id = P2PChannelManager.get_instance().next_channel_id(src_rank, dst_rank)
+    xm.set_send_recv_channels({channel_id: [src_rank, dst_rank]})
     return channel_id
 
   # Call site e.g.
@@ -203,6 +210,7 @@ class ProcessGroupXla(ProcessGroup):
   def make_recv_channel_id(self, src_rank, tag):
     dst_rank = xm.get_ordinal()
     channel_id = P2PChannelManager.get_instance().next_channel_id(src_rank, dst_rank)
+    xm.set_send_recv_channels({channel_id: [src_rank, dst_rank]})
     return channel_id
 
   # Call site e.g.
