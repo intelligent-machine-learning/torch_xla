@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "torch_xla/csrc/common/singleton.h"
+
 namespace lynx {
 
 struct P2PChannelsManager : public Singleton<P2PChannelsManager> {

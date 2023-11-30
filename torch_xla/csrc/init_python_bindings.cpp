@@ -29,7 +29,6 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/pytypes.h"
 #include "pybind11/stl_bind.h"
-#include "torch_xla/csrc/common/singleton.h"
 #include "torch_xla/csrc/common/lynx_types.h"
 #include "torch_xla/csrc/XLANativeFunctions.h"
 #include "torch_xla/csrc/aten_autograd_ops.h"
@@ -1886,8 +1885,7 @@ void InitXlaModuleBindings(py::module m) {
     coordinator.DeactivatePreemptionSyncManager();
   });
   m.def("_set_send_recv_channels", [](py::dict channel_pairs) {
-    auto p2p_channels_map =
-        lynx::Singleton<lynx::P2PChannelsManager>::GetInstance();
+    auto p2p_channels_map = lynx::P2PChannelsManager::GetInstance();
     for (const auto& item : channel_pairs) {
       int64_t channel_id = item.first.cast<int64_t>();
       const auto& src_tgt_list = item.second.cast<py::list>();
