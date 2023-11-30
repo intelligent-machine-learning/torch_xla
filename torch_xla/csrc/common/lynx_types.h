@@ -11,12 +11,12 @@ struct P2PChannelsManager : public Singleton<P2PChannelsManager> {
   typedef long long int int64_t;
 
  public:
-  std::unordered_map < int64_t, std::pair<int64_t, int64_t>* GetChannelsMap() {
+  std::unordered_map<int64_t, std::pair<int64_t, int64_t>>* GetChannelsMap() {
     return &map_;
   }
 
  private:
-  std::unordered_map < int64_t, std::pair<int64_t, int64_t> map_;
+  std::unordered_map<int64_t, std::pair<int64_t, int64_t>> map_;
   friend class Singleton<P2PChannelsManager>;
 };
 
