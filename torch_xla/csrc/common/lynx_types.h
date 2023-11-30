@@ -6,6 +6,8 @@
 namespace lynx {
 
 struct P2PChannelsManager : public Singleton<P2PChannelsManager> {
+  typedef long long int int64_t;
+
  public:
   std::unordered_map < int64_t, std::pair<int64_t, int64_t>* GetChannelsMap() {
     return &map_;
