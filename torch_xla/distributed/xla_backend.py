@@ -51,8 +51,7 @@ class P2PChannelManager(object):
   def get_instance(self):
     if P2PChannelManager._instance is None:
       P2PChannelManager._instance = P2PChannelManager()
-    else:
-      return P2PChannelManager._instance
+    return P2PChannelManager._instance
 
   def _hash(self, src_rank, dst_rank, count):
     return src_rank * 100000 * 100000 + dst_rank * 100000 + count
