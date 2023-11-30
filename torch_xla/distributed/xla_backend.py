@@ -24,14 +24,14 @@ dist.register_rendezvous_handler('xla', rendezvous.pjrt_rendezvous_handler)
 
 
 class P2PChannelManager(object):
-  
+
   _instance = None
-  
+
   def __init__(self):
     self.map = {}
     self.channel_to_src_tgt = {}
     self.id_counter = 0
-    
+
   def next_channel_id(self, src_rank, dst_rank):
     self.id_counter += 1
     channel_id = self.id_counter
@@ -42,7 +42,7 @@ class P2PChannelManager(object):
     self.channel_to_src_tgt[channel_id] = src_rank, dst_rank
     xm.set_send_recv_channels({channel_id: [src_rank, dst_rank]})
     return channel_id
-  
+
   @classmethod
   def get_instance(self):
     if P2PChannelManager._instance is None:
