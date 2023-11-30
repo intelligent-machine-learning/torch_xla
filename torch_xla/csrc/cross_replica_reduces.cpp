@@ -260,15 +260,12 @@ SendResult BuildSendWithToken(xla::XlaOp input, xla::XlaOp token,
   xla::XlaOp result_token = xla::SendWithToken(input, token, channel_handle);
 
   // lynx set frontend_attributes of send op
-  auto send_done_lookup_status =
-      result_token.builder()->LookUpInstruction(result_token);
-  auto send_done_instr = send_done_lookup_status.value();
+  xla::internal::XlaBuilderFriend builder_friend;
+  auto* send_done_instr = builder_friend.GetInstruction(result_token);
   XLA_CHECK(send_done_instr->operand_ids().size() == 1)
       << "send done operands size must be equal to 1";
   auto send_operand_id = send_done_instr->operand_ids(0);
-  auto send_lookup_status =
-      result_token.builder()->LookUpMutableInstructionByHandle(send_operand_id);
-  auto send_instr = send_lookup_status.value();
+  auto* send_instr = GetInstructionByHandle(result_token.builder(), send_operand_id);
   auto* frontend_attributes = send_instr->mutable_frontend_attributes();
   auto p2p_channels_map = lynx::P2PChannelsManager::GetInstance();
   auto src_tgt_pair = (*(p2p_channels_map->GetChannelsMap()))[channel_id];
@@ -294,14 +291,11 @@ RecvResult BuildRecvWithToken(xla::XlaOp token, const xla::Shape& recv_shape,
   xla::XlaOp recv = xla::RecvWithToken(token, recv_shape, channel_handle);
 
   // lynx set frontend_attributes of recv op
-  auto recv_done_lookup_status = recv.builder()->LookUpInstruction(recv);
-  auto recv_done_instr = recv_done_lookup_status.value();
+  auto* recv_done_instr = builder_friend.GetInstruction(recv);
   XLA_CHECK(recv_done_instr->operand_ids().size() == 1)
       << "recv done operands size must be equal to 1";
   auto recv_operand_id = recv_done_instr->operand_ids(0);
-  auto recv_lookup_status =
-      recv.builder()->LookUpMutableInstructionByHandle(recv_operand_id);
-  auto recv_instr = recv_lookup_status.value();
+  auto* recv_instr = GetInstructionByHandle(recv.builder(), recv_operand_id);
   auto* frontend_attributes = recv_instr->mutable_frontend_attributes();
   auto p2p_channels_map = lynx::P2PChannelsManager::GetInstance();
   auto src_tgt_pair = (*(p2p_channels_map->GetChannelsMap()))[channel_id];
