@@ -343,6 +343,8 @@ ptxla_cc_library(
 cc_library(
     name = "common",
     srcs = [],
-    hdrs = ["singleton.h", "base.h", "lynx_types.h"],
+    hdrs = ["common/singleton.h",
+            "common/base.h",
+            "common/lynx_types.h"],
     deps = [],
 )
