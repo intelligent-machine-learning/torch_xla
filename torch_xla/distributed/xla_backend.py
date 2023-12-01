@@ -34,12 +34,12 @@ class P2PChannelManager(object):
 
   def next_channel_id(self, src_rank, dst_rank):
     if (src_rank, dst_rank) not in self.id_counter:
-      self.id_counter[src_rank, dst_rank] = [0]
+      self.id_counter[src_rank, dst_rank] = [1]
     else:
       count = self.id_counter[src_rank, dst_rank][-1]
       self.id_counter[src_rank, dst_rank].append(count+1)
     count = self.id_counter[src_rank, dst_rank][-1]
-    channel_id = self._hash((src_rank, dst_rank, count))
+    channel_id = self._hash(src_rank, dst_rank, count)
     if (src_rank, dst_rank) not in self.map:
       self.map[(src_rank, dst_rank)] = [channel_id,]
     else:

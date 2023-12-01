@@ -346,5 +346,7 @@ cc_library(
     hdrs = ["common/singleton.h",
             "common/base.h",
             "common/lynx_types.h"],
-    deps = [],
+    deps = [
+        "@xla//xla/pjrt:compile_options_proto_cc",
+    ],
 )

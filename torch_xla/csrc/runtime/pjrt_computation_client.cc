@@ -7,6 +7,7 @@
 #include "absl/strings/ascii.h"
 #include "absl/synchronization/blocking_counter.h"
 #include "absl/types/span.h"
+#include "torch_xla/csrc/common/lynx_types.h"
 #include "pjrt_computation_client.h"
 #include "torch_xla/csrc/runtime/computation_client.h"
 #include "torch_xla/csrc/runtime/debug_macros.h"
@@ -488,9 +489,15 @@ std::vector<ComputationClient::ComputationPtr> PjRtComputationClient::Compile(
                                   tsl::profiler::TraceMeLevel::kInfo);
   std::vector<ComputationClient::ComputationPtr> computations;
 
+  auto compile_options wrapper = lynx::CompileOptionsWrapper::GetInstance();
+
   for (auto& instance : instances) {
     xla::CompileOptions compile_options;
-    if (instance.is_sharded) {
+    if (wrapper->initialized) {
+      // TODO(mochen.bmc) set by user and introduce from frontend like python
+      // layer
+      compile_options = wrapper->compile_options;
+    } else if (instance.is_sharded) {
       // TODO(yeounoh) multi-host, multi-slice configurations
       compile_options.executable_build_options.set_use_spmd_partitioning(true);
       // We can override the compiler's default behavior to replicate the

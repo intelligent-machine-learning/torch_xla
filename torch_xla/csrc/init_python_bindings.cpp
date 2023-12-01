@@ -1324,20 +1324,56 @@ void InitXlaModuleBindings(py::module m) {
                       /*warm_up_cache_only=*/true);
         },
         py::arg("tensors"), py::arg("devices"));
-  m.def("_xla_sync_live_tensors",
-        [](const std::string& device, const std::vector<std::string>& devices,
-           bool wait) {
-          NoGilSection nogil;
-          SyncLiveTensors(device, devices, wait);
-        },
-        py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
-  m.def("_xla_step_marker",
-        [](const std::string& device, const std::vector<std::string>& devices,
-           bool wait) {
-          NoGilSection nogil;
-          StepMarker(device, devices, wait);
-        },
-        py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
+  m.def(
+      "_xla_sync_live_tensors",
+      [](const std::string& device, const std::vector<std::string>& devices,
+         bool wait) {
+        NoGilSection nogil;
+        SyncLiveTensors(device, devices, wait);
+      },
+      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
+  m.def(
+      "_xla_step_marker",
+      [](const std::string& device, const std::vector<std::string>& devices,
+         bool wait, const std::optional<py::dict> compile_options_args) {
+        NoGilSection nogil;
+        if (compile_options_args.has_value()) {
+          auto wrapper = lynx::CompileOptionsWrapper::GetInstance();
+          auto& compile_options = wrapper->compile_options;
+          compile_options.use_spmd_partitioning =
+              compile_options_args.value()["use_spmd_partitioning"]
+                  .cast<bool>();
+          compile_options.allow_spmd_sharding_propagation_to_output =
+              compile_options_args
+                  .value()["allow_spmd_sharding_propagation_to_output"]
+                  .cast<bool>();
+          compile_options.num_partitions =
+              compile_options_args.value()["num_partitions"].cast<int>();
+          compile_options.num_replicas =
+              compile_options_args.value()["num_replicas"].cast<int>();
+          compile_options.device_assignment_replica_count =
+              compile_options_args.value()["device_assignment_replica_count"]
+                  .cast<int>();
+          compile_options.device_assignment_computation_count =
+              compile_options_args
+                  .value()["device_assignment_computation_count"]
+                  .cast<int>();
+          std::unordered_map<int, int> ordinals_assignment;
+          auto ordinals_assignment_py_dict =
+              compile_options_args.value()["ordinals_assignment"]
+                  .cast<py::dict>();
+          for (const auto& item : ordinals_assignment_py_dict) {
+            int device_id = static_cast<int>(item.first.cast<int64>());
+            int global_ordinal = static_cast<int>(item.second.cast<int64>());
+            ordinals_assignment[device_id] = global_ordinal;
+          }
+          compile_options.ordinals_assignment = ordinals_assignment;
+          wrapper->initialized = true;
+        }
+        StepMarker(device, devices, wait);
+      },
+      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true,
+      py::args("compile_options_args") = py::none());
   m.def("_get_stablehlo",
         [](const std::vector<at::Tensor>& tensors, const std::string& device,
            const std::vector<std::string>& devices,

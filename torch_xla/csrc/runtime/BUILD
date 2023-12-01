@@ -373,6 +373,7 @@ ptxla_cc_test(
     name = "pjrt_computation_client_test",
     srcs = ["pjrt_computation_client_test.cc"],
     deps = [
+        ":common",
         ":computation_client",
         ":pjrt_computation_client",
         ":tensor_source",
