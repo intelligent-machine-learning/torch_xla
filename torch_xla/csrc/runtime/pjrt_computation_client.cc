@@ -489,7 +489,7 @@ std::vector<ComputationClient::ComputationPtr> PjRtComputationClient::Compile(
                                   tsl::profiler::TraceMeLevel::kInfo);
   std::vector<ComputationClient::ComputationPtr> computations;
 
-  auto compile_options wrapper = lynx::CompileOptionsWrapper::GetInstance();
+  auto& wrapper = lynx::CompileOptionsWrapper::GetInstance();
 
   for (auto& instance : instances) {
     xla::CompileOptions compile_options;
