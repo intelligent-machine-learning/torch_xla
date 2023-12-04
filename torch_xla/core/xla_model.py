@@ -819,7 +819,7 @@ def _run_step_closures():
   return devctx
 
 
-def mark_step(wait=False, compile_options=None):
+def mark_step(wait=False):
   if xu.getenv_as('XLA_EMIT_STEPLOG', bool, False):
     print(
         'torch_xla.core.xla_model::mark_step\n',
@@ -828,8 +828,7 @@ def mark_step(wait=False, compile_options=None):
         flush=True)
   torch_xla._XLAC._xla_step_marker(
       torch_xla._XLAC._xla_get_default_device(), [],
-      wait=xu.getenv_as('XLA_SYNC_WAIT', bool, wait),
-      compile_options=compile_options)
+      wait=xu.getenv_as('XLA_SYNC_WAIT', bool, wait))
   # Only emit metrics from the first local device index, to avoid emitting the
   # same values from different threads.
   if is_master_ordinal():

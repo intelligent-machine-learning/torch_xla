@@ -1335,12 +1335,11 @@ void InitXlaModuleBindings(py::module m) {
   m.def(
       "_xla_step_marker",
       [](const std::string& device, const std::vector<std::string>& devices,
-         bool wait, const std::optional<py::dict> compile_options) {
+         bool wait) {
         NoGilSection nogil;
         StepMarker(device, devices, wait);
       },
-      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true,
-      py::arg("compile_options") = py::none());
+      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
   m.def("_get_stablehlo",
         [](const std::vector<at::Tensor>& tensors, const std::string& device,
            const std::vector<std::string>& devices,

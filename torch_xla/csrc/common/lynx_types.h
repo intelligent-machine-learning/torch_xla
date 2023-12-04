@@ -4,7 +4,6 @@
 #include <utility>
 #include <string>
 
-#include "xla/pjrt/compile_options.pb.h"
 #include "torch_xla/csrc/common/singleton.h"
 
 namespace lynx {
