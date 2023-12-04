@@ -496,7 +496,9 @@ std::vector<ComputationClient::ComputationPtr> PjRtComputationClient::Compile(
     if (wrapper->initialized) {
       // TODO(mochen.bmc) set by user and introduce from frontend like python
       // layer
-      compile_options.FromProto(wrapper->completion_options_proto);
+      TF_ASSIGN_OR_RETURN(
+          compile_options,
+          xla::CompileOptions::FromProto(wrapper->completion_options_proto));
       compile_options.parameter_is_tupled_arguments =
           instance.parameter_is_tupled_arguments;
       auto replica_count = compile_options.executable_build_options.num_replicas();
