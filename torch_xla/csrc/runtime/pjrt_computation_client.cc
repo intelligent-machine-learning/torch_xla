@@ -501,6 +501,9 @@ std::vector<ComputationClient::ComputationPtr> PjRtComputationClient::Compile(
           instance.parameter_is_tupled_arguments;
       auto replica_count = compile_options.executable_build_options.num_replicas();
       auto partition_count = compile_options.executable_build_options.num_partitions();
+      compile_options.executable_build_options
+          .set_allow_spmd_sharding_propagation_to_output(
+              {instance.allow_spmd_sharding_propagation_to_output});
       xla::DeviceAssignment device_assignment(replica_count, partition_count);
       std::unordered_map<int, int> revert_global_ordinals;
       for (const auto& [device_id, global_ordinal] : global_ordinals_) {

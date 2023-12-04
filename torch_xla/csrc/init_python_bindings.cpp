@@ -1343,30 +1343,21 @@ void InitXlaModuleBindings(py::module m) {
           auto* completion_options_proto = &wrapper->completion_options_proto;
           auto* executable_build_options =
               completion_options_proto->mutable_executable_build_options();
-          auto* device_assignment =
-              executable_build_options->mutable_device_assignment();
           executable_build_options->set_use_spmd_partitioning(
               py_options.value()["use_spmd_partitioning"].cast<bool>());
-          executable_build_options
-              ->set_allow_spmd_sharding_propagation_to_output(
-                  py_options
-                      .value()["allow_spmd_sharding_propagation_to_output"]
-                      .cast<bool>());
-          executable_build_options->set_num_partitions(
-              py_options.value()["num_partitions"].cast<int>());
-          executable_build_options->set_num_replicas(
-              py_options.value()["num_replicas"].cast<int>());
-          device_assignment->set_replica_count(
-              py_options.value()["replica_count"].cast<int>());
-          device_assignment->set_computation_count(
-              py_options.value()["computation_count"].cast<int>());
-          for (int computation = 0;
-               computation < device_assignment.computation_count();
+          int num_replicas = py_options.value()["num_replicas"].cast<int>();
+          int num_partitions = py_options.value()["num_partitions"].cast<int>();
+          executable_build_options->set_num_partitions(num_partitions);
+          executable_build_options->set_num_replicas(num_replicas);
+          auto* device_assignment =
+              executable_build_options->mutable_device_assignment();
+          device_assignment->set_replica_count(num_replicas);
+          device_assignment->set_computation_count(num_partitions);
+          for (int32_t computation = 0; computation < num_partitions;
                ++computation) {
             auto* computation_device =
                 device_assignment->add_computation_devices();
-            for (int replica = 0; replica < device_assignment.replica_count();
-                 ++replica) {
+            for (int32_t replica = 0; replica < replica_count; ++replica) {
               computation_device->add_replica_device_ids(
                   {replica, computation});
             }
