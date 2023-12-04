@@ -22,11 +22,6 @@ struct P2PChannelsManager : public Singleton<P2PChannelsManager> {
   friend class Singleton<P2PChannelsManager>;
 };
 
-struct CompileOptionsWrapper : public Singleton<CompileOptionsWrapper> {
-  xla::CompileOptionsProto completion_options_proto;
-  bool initialized = false;
-};
-
 }  // namespace lynx
 
 #endif

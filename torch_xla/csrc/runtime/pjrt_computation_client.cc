@@ -489,43 +489,9 @@ std::vector<ComputationClient::ComputationPtr> PjRtComputationClient::Compile(
                                   tsl::profiler::TraceMeLevel::kInfo);
   std::vector<ComputationClient::ComputationPtr> computations;
 
-  auto wrapper = lynx::CompileOptionsWrapper::GetInstance();
-
   for (auto& instance : instances) {
     xla::CompileOptions compile_options;
-    if (wrapper->initialized) {
-      auto res =
-          xla::CompileOptions::FromProto(wrapper->completion_options_proto);
-      if (TF_PREDICT_FALSE(!res.ok())) {
-        XLA_ERROR() << "Failed to call xla::CompileOptions::FromProto(proto).";
-        continue;
-      }
-      compile_options = std::move(res).value();
-      compile_options.parameter_is_tupled_arguments =
-          instance.parameter_is_tupled_arguments;
-      auto replica_count = compile_options.executable_build_options.num_replicas();
-      auto partition_count = compile_options.executable_build_options.num_partitions();
-      compile_options.executable_build_options
-          .set_allow_spmd_sharding_propagation_to_output(
-              {instance.allow_spmd_sharding_propagation_to_output});
-      xla::DeviceAssignment device_assignment(replica_count, partition_count);
-      std::unordered_map<int, int> revert_global_ordinals;
-      for (const auto& [device_id, global_ordinal] : global_ordinals_) {
-        revert_global_ordinals[global_ordinal] = device_id;
-      }
-      // DeviceAssignment values must be the PjRtDevice ID, so we need to
-      // unwind the global ordinal mapping.
-      for (int64_t partition_id = 0; partition_id < partition_count;
-           ++partition_id) {
-        for (int64_t replica_id = 0; replica_id < replica_count; ++replica_id) {
-          int64_t flattened_id = replica_id * partition_count + partition_id;
-          device_assignment(replica_id, partition_id) =
-              revert_global_ordinals[flattened_id];
-        }
-      }
-      compile_options.executable_build_options.set_device_assignment(
-          device_assignment);
-    } else if (instance.is_sharded) {
+    if (instance.is_sharded) {
       // TODO(yeounoh) multi-host, multi-slice configurations
       compile_options.executable_build_options.set_use_spmd_partitioning(true);
       // We can override the compiler's default behavior to replicate the
