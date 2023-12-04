@@ -88,6 +88,7 @@ cc_library(
     ":tensor_source",
     ":tf_logging",
     ":xla_coordinator",
+    "//torch_xla/csrc:common",
     "//torch_xla/csrc:thread_pool",
     "@xla//xla:literal",
     "@xla//xla:shape_util",
