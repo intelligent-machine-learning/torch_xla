@@ -1353,15 +1353,15 @@ void InitXlaModuleBindings(py::module m) {
               executable_build_options->mutable_device_assignment();
           device_assignment->set_replica_count(num_replicas);
           device_assignment->set_computation_count(num_partitions);
-          for (int32_t computation = 0; computation < num_partitions;
-               ++computation) {
-            auto* computation_device =
-                device_assignment->add_computation_devices();
-            for (int32_t replica = 0; replica < replica_count; ++replica) {
-              computation_device->add_replica_device_ids(
-                  {replica, computation});
-            }
-          }
+          // for (int32_t computation = 0; computation < num_partitions;
+          //      ++computation) {
+          //   auto* computation_device =
+          //       device_assignment->add_computation_devices();
+          //   for (int32_t replica = 0; replica < num_replicas; ++replica) {
+          //     computation_device->add_replica_device_ids(
+          //         {replica, computation});
+          //   }
+          // }
           wrapper->initialized = true;
         }
         StepMarker(device, devices, wait);
