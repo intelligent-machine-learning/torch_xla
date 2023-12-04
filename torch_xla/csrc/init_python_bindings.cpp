@@ -1349,19 +1349,7 @@ void InitXlaModuleBindings(py::module m) {
           int num_partitions = py_options.value()["num_partitions"].cast<int>();
           executable_build_options->set_num_partitions(num_partitions);
           executable_build_options->set_num_replicas(num_replicas);
-          auto* device_assignment =
-              executable_build_options->mutable_device_assignment();
-          device_assignment->set_replica_count(num_replicas);
-          device_assignment->set_computation_count(num_partitions);
-          // for (int32_t computation = 0; computation < num_partitions;
-          //      ++computation) {
-          //   auto* computation_device =
-          //       device_assignment->add_computation_devices();
-          //   for (int32_t replica = 0; replica < num_replicas; ++replica) {
-          //     computation_device->add_replica_device_ids(
-          //         {replica, computation});
-          //   }
-          // }
+          // TODO: device assignment move to pjrt_computation_client.cc
           wrapper->initialized = true;
         }
         StepMarker(device, devices, wait);
