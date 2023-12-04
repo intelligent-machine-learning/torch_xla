@@ -1340,35 +1340,35 @@ void InitXlaModuleBindings(py::module m) {
         auto& py_options = compile_options_args;
         if (py_options.has_value()) {
           auto wrapper = lynx::CompileOptionsWrapper::GetInstance();
-          auto& completion_options_proto = wrapper->completion_options_proto;
-          auto& executable_build_options = completion_options_proto.executable_build_options;
-          auto& device_assignment =
-              executable_build_options
-                  .device_assignment;
+          auto* completion_options_proto = &wrapper->completion_options_proto;
+          auto* executable_build_options =
+              completion_options_proto->mutable_executable_build_options();
+          auto* device_assignment =
+              executable_build_options->mutable_device_assignment();
+          executable_build_options->set_use_spmd_partitioning(
+              py_options.value()["use_spmd_partitioning"].cast<bool>());
           executable_build_options
-              .set_use_spmd_partitioning(
-                  py_options.value()["use_spmd_partitioning"]
-                      .cast<bool>());
-          executable_build_options
-              .set_allow_spmd_sharding_propagation_to_output(
+              ->set_allow_spmd_sharding_propagation_to_output(
                   py_options
                       .value()["allow_spmd_sharding_propagation_to_output"]
                       .cast<bool>());
-          executable_build_options.set_num_partitions(
+          executable_build_options->set_num_partitions(
               py_options.value()["num_partitions"].cast<int>());
-          executable_build_options.set_num_replicas(
+          executable_build_options->set_num_replicas(
               py_options.value()["num_replicas"].cast<int>());
-          device_assignment.set_replica_count(py_options
-                      .value()["replica_count"]
-                      .cast<int>());
-          device_assignment.set_computation_count(py_options
-                      .value()["computation_count"]
-                      .cast<int>());
-          for (int computation = 0; computation < device_assignment.computation_count(); ++computation) {
-            auto& computation_device =
-                device_assignment.add_computation_devices();
-            for (int replica = 0; replica < device_assignment.replica_count(); ++replica) {
-              computation_device.add_replica_device_ids({replica, computation});
+          device_assignment->set_replica_count(
+              py_options.value()["replica_count"].cast<int>());
+          device_assignment->set_computation_count(
+              py_options.value()["computation_count"].cast<int>());
+          for (int computation = 0;
+               computation < device_assignment.computation_count();
+               ++computation) {
+            auto* computation_device =
+                device_assignment->add_computation_devices();
+            for (int replica = 0; replica < device_assignment.replica_count();
+                 ++replica) {
+              computation_device->add_replica_device_ids(
+                  {replica, computation});
             }
           }
           wrapper->initialized = true;
@@ -1376,7 +1376,7 @@ void InitXlaModuleBindings(py::module m) {
         StepMarker(device, devices, wait);
       },
       py::arg("device") = "", py::arg("devices"), py::arg("wait") = true,
-      py::args("compile_options_args") = py::none());
+      py::arg("compile_options_args") = py::none());
   m.def("_get_stablehlo",
         [](const std::vector<at::Tensor>& tensors, const std::string& device,
            const std::vector<std::string>& devices,
