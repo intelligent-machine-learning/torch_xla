@@ -496,7 +496,28 @@ std::vector<ComputationClient::ComputationPtr> PjRtComputationClient::Compile(
     if (wrapper->initialized) {
       // TODO(mochen.bmc) set by user and introduce from frontend like python
       // layer
-      compile_options = wrapper->compile_options;
+      compile_options.FromProto(wrapper->compile_options);
+      compile_options.parameter_is_tupled_arguments =
+          instance.parameter_is_tupled_arguments;
+      auto replica_count = compile_options.executable_build_options.num_replicas();
+      auto partition_count = compile_options.executable_build_options.num_partitions();
+      xla::DeviceAssignment device_assignment(replica_count, partition_count);
+      std::unordered_map<int, int> revert_global_ordinals;
+      for (const auto& [device_id, global_ordinal] : global_ordinals_) {
+        revert_global_ordinals[global_ordinal] = device_id;
+      }
+      // DeviceAssignment values must be the PjRtDevice ID, so we need to
+      // unwind the global ordinal mapping.
+      for (int64_t partition_id = 0; partition_id < partition_count;
+           ++partition_id) {
+        for (int64_t replica_id = 0; replica_id < replica_count; ++replica_id) {
+          int64_t flattened_id = replica_id * partition_count + partition_id;
+          device_assignment(replica_id, partition_id) =
+              revert_global_ordinals[flattened_id];
+        }
+      }
+      compile_options.executable_build_options.set_device_assignment(
+          device_assignment);
     } else if (instance.is_sharded) {
       // TODO(yeounoh) multi-host, multi-slice configurations
       compile_options.executable_build_options.set_use_spmd_partitioning(true);

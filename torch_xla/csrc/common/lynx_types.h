@@ -23,7 +23,7 @@ struct P2PChannelsManager : public Singleton<P2PChannelsManager> {
 };
 
 struct CompileOptionsWrapper : public Singleton<CompileOptionsWrapper> {
-  xla::CompileOptions completion_options;
+  xla::CompileOptionsProto completion_options_proto;
   bool initialized = false;
 };
 
