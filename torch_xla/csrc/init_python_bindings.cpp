@@ -1326,18 +1326,18 @@ void InitXlaModuleBindings(py::module m) {
         py::arg("tensors"), py::arg("devices"));
   m.def("_xla_sync_live_tensors",
         [](const std::string& device, const std::vector<std::string>& devices,
-          bool wait) {
+           bool wait) {
           NoGilSection nogil;
           SyncLiveTensors(device, devices, wait);
         },
         py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
   m.def("_xla_step_marker",
         [](const std::string& device, const std::vector<std::string>& devices,
-          bool wait) {
+           bool wait) {
           NoGilSection nogil;
           StepMarker(device, devices, wait);
         },
-      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
+        py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
   m.def("_get_stablehlo",
         [](const std::vector<at::Tensor>& tensors, const std::string& device,
            const std::vector<std::string>& devices,
