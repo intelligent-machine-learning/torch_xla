@@ -1,8 +1,8 @@
 #ifndef XLA_TORCH_XLA_CSRC_COMMON_LYNX_TYPES_H_
 #define XLA_TORCH_XLA_CSRC_COMMON_LYNX_TYPES_H_
+#include <string>
 #include <unordered_map>
 #include <utility>
-#include <string>
 
 #include "torch_xla/csrc/common/singleton.h"
 

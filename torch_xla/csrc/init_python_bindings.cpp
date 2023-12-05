@@ -29,10 +29,10 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/pytypes.h"
 #include "pybind11/stl_bind.h"
-#include "torch_xla/csrc/common/lynx_types.h"
 #include "torch_xla/csrc/XLANativeFunctions.h"
 #include "torch_xla/csrc/aten_autograd_ops.h"
 #include "torch_xla/csrc/aten_xla_bridge.h"
+#include "torch_xla/csrc/common/lynx_types.h"
 #include "torch_xla/csrc/device.h"
 #include "torch_xla/csrc/dtype.h"
 #include "torch_xla/csrc/helpers.h"
@@ -1324,21 +1324,19 @@ void InitXlaModuleBindings(py::module m) {
                       /*warm_up_cache_only=*/true);
         },
         py::arg("tensors"), py::arg("devices"));
-  m.def(
-      "_xla_sync_live_tensors",
-      [](const std::string& device, const std::vector<std::string>& devices,
-         bool wait) {
-        NoGilSection nogil;
-        SyncLiveTensors(device, devices, wait);
-      },
-      py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
-  m.def(
-      "_xla_step_marker",
-      [](const std::string& device, const std::vector<std::string>& devices,
-         bool wait) {
-        NoGilSection nogil;
-        StepMarker(device, devices, wait);
-      },
+  m.def("_xla_sync_live_tensors",
+        [](const std::string& device, const std::vector<std::string>& devices,
+          bool wait) {
+          NoGilSection nogil;
+          SyncLiveTensors(device, devices, wait);
+        },
+        py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
+  m.def("_xla_step_marker",
+        [](const std::string& device, const std::vector<std::string>& devices,
+          bool wait) {
+          NoGilSection nogil;
+          StepMarker(device, devices, wait);
+        },
       py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
   m.def("_get_stablehlo",
         [](const std::vector<at::Tensor>& tensors, const std::string& device,

@@ -26,11 +26,11 @@
 #include <unordered_set>
 #include <vector>
 
-#define DISALLOW_COPY_AND_MOVE(className)             \
-    className(const className &) = delete;            \
-    className &operator=(const className &) = delete; \
-    className(className &&) = delete;                 \
-    className &operator=(className &&) = delete
+#define DISALLOW_COPY_AND_MOVE(className)           \
+  className(const className &) = delete;            \
+  className &operator=(const className &) = delete; \
+  className(className &&) = delete;                 \
+  className &operator=(className &&) = delete
 #endif
 
 #ifndef LIKELY
