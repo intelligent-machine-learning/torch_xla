@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 import args_parse
@@ -30,8 +31,8 @@ class ProfilerTest(unittest.TestCase):
     with open(fname, 'r') as f:
       debug_warnings = f.read()
     logging.info(f'PT_XLA_DEBUG_FILE Contents:\n{debug_warnings}')
-    self.assertTrue('TransferFromServerTime too frequent' in debug_warnings,
-                    f'Expected "TransferFromServerTime" warning in: {fname}')
+    self.assertTrue('TransferFromDeviceTime too frequent' in debug_warnings,
+                    f'Expected "TransferFromDeviceTime" warning in: {fname}')
     self.assertTrue('CompileTime too frequent' in debug_warnings,
                     f'Expected "CompileTime" wraning in: {fname}')
 
@@ -63,6 +64,13 @@ class ProfilerTest(unittest.TestCase):
           num_epochs=10)
       flags.fake_data = True
       flags.profiler_port = port
+
+      # Disable programmatic profiling
+      flags.profile_step = -1
+      flags.profile_epoch = -1
+      flags.profile_logdir = None
+      flags.profile_duration_ms = -1
+
       test_profile_mp_mnist.train_mnist(
           flags,
           training_started=training_started,

@@ -139,9 +139,10 @@ XLATensor::XLATensor(std::shared_ptr<View> view,
 XLATensor::XLATensor(std::shared_ptr<Data> data)
     : torch::lazy::LazyTensor(data),
       data_(std::move(data)),
-      storage_(c10::Storage({}, 0,
-                            c10::DataPtr(nullptr, bridge::XlaDeviceToAtenDevice(
-                                                      data_->device)))) {}
+      storage_(c10::Storage(
+          {}, 0,
+          c10::DataPtr(nullptr, bridge::XlaDeviceToAtenDevice(data_->device)))),
+      base_() {}
 
 auto XLATensor::data() const -> const std::shared_ptr<Data>& {
   XLA_CHECK(data_ != nullptr) << "Trying to access a null cursor";
@@ -383,7 +384,7 @@ torch::lazy::Value XLATensor::GetIrValueForTensor(
       return ScalarOp(std::move(value),
                       MakeXlaPrimitiveType(tensor.scalar_type(), &device));
     }
-    data = XLAGraphExecutor::Get()->GetDeviceData(tensor, device);
+    data = XLAGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;
   } else {
     TORCH_LAZY_TIMED("IrValueTensorToXlaData");
@@ -466,7 +467,8 @@ at::Tensor XLATensor::ToTensor(bool detached) {
     XLAGraphExecutor::Get()->DeviceBarrier(GetDevice());
     // The GetXlaData() call will trigger an ApplyPendingGraph() if an IR
     // XlaNode is available on the tensor.
-    std::vector<at::Tensor> tensors = XlaDataToTensors({GetXlaData()}, dtype());
+    std::vector<at::Tensor> tensors =
+        XlaDataToTensors({GetXlaData()}, {dtype()});
     tensor = std::move(tensors.front());
     if (!detached) {
       SetTensorData(tensor);
@@ -894,6 +896,17 @@ int64_t XLATensor::GetHandle() const {
 void XLATensor::MarkDynamicDimension(uint32_t dim) {
   auto* xla_node = dynamic_cast<XlaNode*>(GetIrValue().node.get());
   xla_node->MarkDynamicDimension(dim);
+}
+
+bool XLATensor::SetNodeUserMetadata(
+    std::shared_ptr<torch::lazy::UserMetaData> metadata) {
+  auto* node = dynamic_cast<XlaNode*>(CurrentIrValue().node.get());
+  // auto* node = dynamic_cast<torch::lazy::Node*>(GetIrValue().node.get());
+  if (node != nullptr) {
+    node->SetUserMetadataForSubGraph(metadata);
+    return true;
+  }
+  return false;
 }
 
 }  // namespace torch_xla

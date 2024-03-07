@@ -157,9 +157,16 @@ class DynamoSpmdInferenceTest(test_xla_sharding_base.XlaShardingTest):
       saved_var = None
     os.environ['XLA_DYNAMO_INPUT_SHARDING_CHECK_THRESHOLD'] = '2'
 
+    # Execute the graph, threshold becomes 1 after this.
     dynamo_res = dynamo_linear(xla_x)
+    # Change the sharding, given it is within threshold, following execution should
+    # go through. Since the sharding change is detected, threshold will get reset to 2.
     xs.mark_sharding(xla_x, self._get_mesh((1, self.n_devices)), (1, 0))
     dynamo_res = dynamo_linear(xla_x)
+    dynamo_res = dynamo_linear(xla_x)
+    dynamo_res = dynamo_linear(xla_x)
+    # Change the sharding again, now it exceed the threshold, we expect the graph execution
+    # to fail.
     xs.clear_sharding(xla_x)
     xs.mark_sharding(xla_x, self._get_mesh((1, self.n_devices)), (0, 1))
     # crash will hapeen in a async execution thread, need to grab the lock again to

@@ -55,7 +55,7 @@
 //         ATEN_OP2(op_name, overload_name)>::call(args...)
 //   ATEN_OP accepts an operator name without an overload, and
 //   ATEN_OP2 accepts an operator name along with its overload name.
-//   The description of these acros can be found in
+//   The description of these macros can be found in
 //   https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/templates/Operators.h
 //   (You can find some examples below)
 
@@ -694,7 +694,12 @@ at::Tensor XLANativeFunctions::as_strided_copy(
     const at::Tensor& self, at::IntArrayRef size, at::IntArrayRef stride,
     c10::optional<int64_t> storage_offset) {
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
-  XLATensorPtr self_tensor = bridge::GetXlaTensor(self);
+  // Retrieve the base tensor, if there's one.
+  // This function actually operates on the tensor's storage. Since XLA does not
+  // expose the actual storage, we use the originally allocated tensor.
+  const at::Tensor& base = bridge::GetXlaTensor(self)->Base();
+  const at::Tensor& tensor = base.defined() ? base : self;
+  XLATensorPtr self_tensor = bridge::GetXlaTensor(tensor);
   auto xsize = XlaHelpers::I64List(size);
   auto xstride = XlaHelpers::I64List(stride);
   if (!AsStrided::StrideIsSupported(self_tensor->shape(), xsize, xstride,
@@ -703,9 +708,14 @@ at::Tensor XLANativeFunctions::as_strided_copy(
         &xla_cpu_fallback, ATEN_OP(as_strided)>::call(self, size, stride,
                                                       storage_offset);
   }
-  return bridge::AtenFromXlaTensor(tensor_methods::as_strided(
-      self_tensor, std::move(xsize), std::move(xstride),
-      XlaHelpers::I64Optional(storage_offset)));
+  // Sets the base tensor as tensor.
+  // Even though this function copies (without aliasing) tensor, it's still
+  // treated as a view function in the functionalization layer.
+  return bridge::AtenFromXlaTensor(bridge::SetBaseTensor(
+      tensor_methods::as_strided(self_tensor, std::move(xsize),
+                                 std::move(xstride),
+                                 XlaHelpers::I64Optional(storage_offset)),
+      tensor));
 }
 
 at::Tensor XLANativeFunctions::as_strided_scatter(
@@ -735,12 +745,6 @@ at::Tensor XLANativeFunctions::as_strided_scatter(
 at::Tensor XLANativeFunctions::atan2(const at::Tensor& self,
                                      const at::Tensor& other) {
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
-  // xla::Atan2 doesn't support integer types.
-  if (!self.is_floating_point() || !other.is_floating_point()) {
-    return at::native::call_fallback_fn<&xla_cpu_fallback,
-                                        ATEN_OP(atan2)>::call(self, other);
-  }
-
   auto common_device = torch_xla::bridge::GetXlaDevice(self, other);
   XLA_CHECK(common_device);
   torch::lazy::NodePtr node =
@@ -1065,12 +1069,6 @@ at::Tensor XLANativeFunctions::cumsum(const at::Tensor& self, int64_t dim,
                                       c10::optional<at::ScalarType> dtype) {
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
   XLATensorPtr self_tensor = bridge::GetXlaTensor(self);
-  if (IsOperationOnType(dtype, self_tensor->dtype(), at::ScalarType::Long)) {
-    // XLA reduce-window does not support S64 mode.
-    return at::native::call_fallback_fn<&xla_cpu_fallback,
-                                        ATEN_OP(cumsum)>::call(self, dim,
-                                                               dtype);
-  }
   return bridge::AtenFromXlaTensor(
       tensor_methods::cumsum(self_tensor, dim, dtype));
 }
@@ -1101,10 +1099,15 @@ at::Tensor XLANativeFunctions::diagonal_scatter(const at::Tensor& base,
                                                 int64_t dim2) {
   auto base_ = bridge::GetXlaTensor(base);
   auto mutated_view_ = bridge::GetXlaTensor(mutated_view);
+  int64_t base_rank = bridge::GetXlaTensor(base)->shape().get().rank();
+  int64_t canonical_dim1 =
+      torch::lazy::GetCanonicalDimensionIndex(dim1, base_rank);
+  int64_t canonical_dim2 =
+      torch::lazy::GetCanonicalDimensionIndex(dim2, base_rank);
   return bridge::AtenFromXlaTensor(
       base_->CreateFrom(torch::lazy::MakeNode<DiagonalViewUpdate>(
-          base_->GetIrValue(), mutated_view_->GetIrValue(), offset, dim1,
-          dim2)));
+          base_->GetIrValue(), mutated_view_->GetIrValue(), offset,
+          canonical_dim1, canonical_dim2)));
 }
 
 at::Tensor XLANativeFunctions::div(const at::Tensor& self,
@@ -2305,11 +2308,6 @@ at::Tensor XLANativeFunctions::permute_copy(const at::Tensor& self,
 at::Tensor XLANativeFunctions::pow(const at::Tensor& self,
                                    const at::Scalar& exponent) {
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
-  // xla::Pow() doesn't support integer types.
-  if (!at::native::is_floating_point(self)) {
-    return at::native::call_fallback_fn<
-        &xla_cpu_fallback, ATEN_OP2(pow, Tensor_Scalar)>::call(self, exponent);
-  }
   return bridge::AtenFromXlaTensor(
       tensor_methods::pow(bridge::GetXlaTensor(self), exponent));
 }
@@ -2317,11 +2315,6 @@ at::Tensor XLANativeFunctions::pow(const at::Tensor& self,
 at::Tensor XLANativeFunctions::pow(const at::Tensor& self,
                                    const at::Tensor& exponent) {
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
-  // xla::Pow() doesn't support integer types.
-  if (!at::native::is_floating_point(self)) {
-    return at::native::call_fallback_fn<
-        &xla_cpu_fallback, ATEN_OP2(pow, Tensor_Tensor)>::call(self, exponent);
-  }
   return bridge::AtenFromXlaTensor(tensor_methods::pow(
       bridge::GetXlaTensor(self), bridge::GetXlaTensor(exponent)));
 }
@@ -2329,12 +2322,6 @@ at::Tensor XLANativeFunctions::pow(const at::Tensor& self,
 at::Tensor XLANativeFunctions::pow(const at::Scalar& self,
                                    const at::Tensor& exponent) {
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
-  // xla::Pow() doesn't support integer types.
-  if (!self.isFloatingPoint()) {
-    return at::native::call_fallback_fn<&xla_cpu_fallback,
-                                        ATEN_OP2(pow, Scalar)>::call(self,
-                                                                     exponent);
-  }
   return bridge::AtenFromXlaTensor(
       tensor_methods::pow(self, bridge::GetXlaTensor(exponent)));
 }
@@ -2791,8 +2778,10 @@ at::Tensor XLANativeFunctions::slice_copy(const at::Tensor& self, int64_t dim,
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
   int64_t start_val = start.has_value() ? start.value() : 0;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
-  return bridge::AtenFromXlaTensor(tensor_methods::slice(
-      bridge::GetXlaTensor(self), dim, start_val, end_val, step));
+  return bridge::AtenFromXlaTensor(bridge::SetBaseTensor(
+      tensor_methods::slice(bridge::GetXlaTensor(self), dim, start_val, end_val,
+                            step),
+      self));
 }
 
 at::Tensor XLANativeFunctions::slice_scatter(
@@ -2897,12 +2886,6 @@ std::vector<at::Tensor> XLANativeFunctions::split_with_sizes_copy(
   auto xla_tensors = tensor_methods::split_with_sizes(
       bridge::GetXlaTensor(self), XlaHelpers::I64List(split_sizes), dim);
   return bridge::AtenFromXlaTensors(xla_tensors);
-}
-
-at::Tensor XLANativeFunctions::sqrt(const at::Tensor& self) {
-  TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
-  return bridge::AtenFromXlaTensor(
-      tensor_methods::sqrt(bridge::GetXlaTensor(self)));
 }
 
 at::Tensor XLANativeFunctions::squeeze_copy(const at::Tensor& self) {
@@ -3789,13 +3772,15 @@ at::Tensor XLANativeFunctions::as_strided(
     const at::Tensor& self, at::IntArrayRef size, at::IntArrayRef stride,
     c10::optional<int64_t> storage_offset) {
   TORCH_LAZY_FN_COUNTER_TIMED_TRACING("xla::");
-  XLATensorPtr self_tensor = bridge::GetXlaTensor(self);
+  const auto& base = bridge::GetXlaTensor(self)->Base();
+  const auto& tensor = base.defined() ? base : self;
+  XLATensorPtr self_tensor = bridge::GetXlaTensor(tensor);
   auto xsize = XlaHelpers::I64List(size);
   auto xstride = XlaHelpers::I64List(stride);
   if (!AsStrided::StrideIsSupported(self_tensor->shape(), xsize, xstride,
                                     storage_offset.value_or(0))) {
     return at::native::call_fallback_fn<
-        &xla_cpu_fallback, ATEN_OP(as_strided)>::call(self, size, stride,
+        &xla_cpu_fallback, ATEN_OP(as_strided)>::call(tensor, size, stride,
                                                       storage_offset);
   }
   return bridge::AtenFromXlaTensor(tensor_methods::as_strided(

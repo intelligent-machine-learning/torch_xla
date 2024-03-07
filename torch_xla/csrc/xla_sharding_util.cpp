@@ -32,6 +32,34 @@
 #include "xla/xla.pb.h"
 
 namespace torch_xla {
+
+// Macro for defining a function that will be run at static initialization time
+// to define a library of operators in the namespace. Used to define a new set
+// of custom operators that do not already exist in PyTorch.
+TORCH_LIBRARY(xla, m) {
+  m.def(
+      "max_pool2d_forward(Tensor self, int[2] kernel_size, int[2] stride=[], "
+      "int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::XLA,
+          TORCH_FN(torch_xla::aten_autograd_ops::max_pool2d_forward)));
+
+  m.def(
+      "max_pool2d_backward(Tensor grad_output, Tensor self, int[2] "
+      "kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False) "
+      "-> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::XLA,
+          TORCH_FN(torch_xla::aten_autograd_ops::max_pool2d_backward)));
+  m.def(
+      "xla_mark_sharding_dynamo_custom_op(Tensor input, int[][] "
+      "tile_assignment, int[][] group_assignment, int[][] replication_groups, "
+      "int sharding_type) -> ()",
+      torch::dispatch(
+          c10::DispatchKey::XLA,
+          TORCH_FN(torch_xla::ShardingUtil::XlaMarkShardingDynamoCustomOp)));
+}
+
 namespace {
 
 using tsl::ERROR;
@@ -312,86 +340,6 @@ xla::HloModuleProto ShardingUtil::SpmdPartitioningPass(
   return module.get()->ToProto();
 }
 
-std::vector<std::vector<runtime::ComputationClient::DataPtr>>
-ShardingUtil::InputHandler(
-    std::vector<runtime::ComputationClient::DataPtr> arguments,
-    std::vector<std::string> devices) {
-  tsl::profiler::TraceMe activity("InputHandler",
-                                  tsl::profiler::TraceMeLevel::kInfo);
-  std::vector<std::vector<runtime::ComputationClient::DataPtr>>
-      arguments_by_device(
-          devices.size(),
-          std::vector<runtime::ComputationClient::DataPtr>(arguments.size()));
-  // This assumes that the (local) devices are sorted, in order to associate
-  // the first local index with the first global device ordinal.
-  auto device_index = build_index_map(devices);
-
-  absl::BlockingCounter counter(devices.size());
-
-  for (int i = 0; i < devices.size(); i++) {
-    auto argument_setter = [&, i]() {
-      for (int64_t argument_i = 0; argument_i < arguments.size();
-           ++argument_i) {
-        runtime::ComputationClient::DataPtr shard =
-            runtime::GetComputationClient()->GetDataShard(arguments[argument_i],
-                                                          i);
-        int global_ordinal = ParseDeviceString(shard->device()).ordinal();
-        int device_i = device_index[global_ordinal];
-        arguments_by_device[device_i][argument_i] = shard;
-      }
-      counter.DecrementCount();
-    };
-    thread::Schedule(std::move(argument_setter));
-  }
-  counter.Wait();
-  return arguments_by_device;
-}
-
-std::vector<runtime::ComputationClient::DataPtr> ShardingUtil::OutputHandler(
-    std::vector<std::vector<runtime::ComputationClient::DataPtr>>
-        sharded_results,
-    std::vector<XLATensor::ShardingSpecPtr> sharding_specs,
-    bool replicated_output) {
-  tsl::profiler::TraceMe activity("OutputHandler",
-                                  tsl::profiler::TraceMeLevel::kInfo);
-  std::vector<runtime::ComputationClient::DataPtr> outputs;
-  outputs.reserve(sharding_specs.size());
-  for (int i = 0; i < sharding_specs.size(); ++i) {
-    XLATensor::ShardingSpecPtr sharding = sharding_specs[i];
-    if (replicated_output && sharding &&
-        (sharding->sharding.type() != xla::OpSharding::REPLICATED)) {
-      // Reshards replicated output if `sharding` is present.
-      std::vector<at::Tensor> tensors = XlaDataToTensors(
-          {sharded_results[0][i]},
-          MaybeUpcastToHostTorchType(sharding->shape.element_type()));
-      outputs.push_back(
-          std::dynamic_pointer_cast<runtime::ComputationClient::Data>(
-              CreateTensorsData(
-                  tensors, {sharding},
-                  std::vector<std::string>{GetVirtualDevice().toString()})[0]));
-    } else {
-      // The output is sharded or replicated.
-      std::vector<runtime::ComputationClient::DataPtr> shards;
-      shards.reserve(sharded_results.size());
-      for (int j = 0; j < sharded_results.size(); ++j) {
-        XLA_CHECK(sharded_results[j][i]->HasValue());
-        shards.push_back(sharded_results[j][i]);
-      }
-      if (!sharding) {
-        // Without an explicit sharding annotation, the output is implicitly
-        // replicated
-        sharding = std::make_shared<XLATensor::ShardingSpec>(
-            xla::HloSharding::Replicate().ToProto(),
-            sharded_results[0][i]->shape());
-      }
-      outputs.push_back(runtime::GetComputationClient()->WrapDataShards(
-          shards, GetVirtualDevice().toString(), sharding->shape,
-          sharding->sharding));
-    }
-  }
-  return outputs;
-}
-
 std::vector<int64_t> ShardingUtil::GetShardShape(
     const XLATensor::ShardingSpecPtr shardings) {
   auto sharding = shardings->sharding;
@@ -640,8 +588,8 @@ std::vector<torch::lazy::BackendDataPtr> ShardingUtil::CreateShardedPlaceholder(
     // hold the corresponding computation results for both sharding &
     // replication.
     auto sharded_data_placeholder =
-        runtime::GetComputationClient()->WrapDataShards(
-            {}, GetVirtualDevice().toString(), sharding_specs[i]->shape,
+        runtime::GetComputationClient()->CreateDataPlaceholder(
+            GetVirtualDevice().toString(), sharding_specs[i]->shape,
             sharding_specs[i]->sharding);
 
     // Register the sharded data placeholder to the tensor and its node.
@@ -696,8 +644,8 @@ void ShardingUtil::PrepareOutputShardingPropagation(
     // hold the corresponding computation results for both sharding &
     // replication.
     auto sharded_data_placeholder =
-        runtime::GetComputationClient()->WrapDataShards(
-            {}, GetVirtualDevice().toString(), (*sharding_specs)[i]->shape,
+        runtime::GetComputationClient()->CreateDataPlaceholder(
+            GetVirtualDevice().toString(), (*sharding_specs)[i]->shape,
             (*sharding_specs)[i]->sharding);
 
     // Register the sharded data placeholder to the tensor and its node.
@@ -736,12 +684,12 @@ runtime::ComputationClient::DataPtr ShardingUtil::CreateShardedData(
     source_tensors.push_back(std::make_shared<runtime::AtenSource>(
         local_shards[j], shard_shape, devices[j]));
   }
-  return runtime::GetComputationClient()->TransferShardsToServer(
+  return runtime::GetComputationClient()->TransferShardsToDevice(
       source_tensors, GetVirtualDevice().toString(), global_shape, sharding);
 }
 
-void ShardingUtil::xla_mark_sharding(const at::Tensor& input,
-                                     xla::OpSharding sharding) {
+void ShardingUtil::XlaMarkSharding(const at::Tensor& input,
+                                   xla::OpSharding sharding) {
   TORCH_LAZY_COUNTER("XlaMarkSharding", 1);
   XLA_CHECK(UseVirtualDevice())
       << "Please enable SPMD via `torch_xla.runtime.use_spmd()`";
@@ -807,7 +755,7 @@ void ShardingUtil::xla_mark_sharding(const at::Tensor& input,
   XLAGraphExecutor::Get()->RegisterTensor(xtensor->data());
 }
 
-void xla_mark_sharding_dynamo_custom_op(
+void ShardingUtil::XlaMarkShardingDynamoCustomOp(
     const at::Tensor& input, c10::List<at::IntArrayRef> tile_assignment,
     c10::List<at::IntArrayRef> group_assignment,
     c10::List<at::IntArrayRef> replication_groups, int64_t sharding_type) {
@@ -842,33 +790,7 @@ void xla_mark_sharding_dynamo_custom_op(
       tile_assignment_py, group_assignment_py, replication_groups_py,
       ShardingUtil::ShardingType(sharding_type));
 
-  ShardingUtil::xla_mark_sharding(input, op_sharding);
-}
-
-// Macro for defining a function that will be run at static initialization time
-// to define a library of operators in the namespace. Used to define a new set
-// of custom operators that do not already exist in PyTorch.
-TORCH_LIBRARY(xla, m) {
-  m.def(
-      "max_pool2d_forward(Tensor self, int[2] kernel_size, int[2] stride=[], "
-      "int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::XLA,
-          TORCH_FN(torch_xla::aten_autograd_ops::max_pool2d_forward)));
-
-  m.def(
-      "max_pool2d_backward(Tensor grad_output, Tensor self, int[2] "
-      "kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False) "
-      "-> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::XLA,
-          TORCH_FN(torch_xla::aten_autograd_ops::max_pool2d_backward)));
-  m.def(
-      "xla_mark_sharding_dynamo_custom_op(Tensor input, int[][] "
-      "tile_assignment, int[][] group_assignment, int[][] replication_groups, "
-      "int sharding_type) -> ()",
-      torch::dispatch(c10::DispatchKey::XLA,
-                      TORCH_FN(torch_xla::xla_mark_sharding_dynamo_custom_op)));
+  ShardingUtil::XlaMarkSharding(input, op_sharding);
 }
 
 }  // namespace torch_xla

@@ -29,6 +29,7 @@ cc_library(
     ":computation_client",
     ":env_vars",
     ":pjrt_computation_client",
+    ":ifrt_computation_client",
     "@tsl//tsl/platform:stacktrace",
   ],
 )
@@ -71,6 +72,36 @@ cc_library(
 )
 
 cc_library(
+  name = "ifrt_computation_client",
+  srcs = [
+    "ifrt_computation_client.cc",
+  ],
+  hdrs = [
+    "ifrt_computation_client.h",
+  ],
+  deps = [
+    ":computation_client",
+    ":debug_macros",
+    ":env_vars",
+    ":pjrt_registry",
+    ":operation_manager",
+    ":stablehlo_helper",
+    ":tf_logging",
+    "@xla//xla:literal",
+    "@xla//xla:shape_util",
+    "@xla//xla/client:xla_computation",
+    "@xla//xla/pjrt/distributed",
+    "@xla//xla/pjrt:pjrt_client",
+    "@xla//xla/python/ifrt",
+    "@xla//xla/python/pjrt_ifrt",
+    "@tsl//tsl/profiler/lib:traceme",
+    "@tsl//tsl/platform/cloud:gcs_file_system",
+    "@com_google_absl//absl/strings",
+    "@com_google_absl//absl/types:span",
+  ],
+)
+
+cc_library(
   name = "pjrt_computation_client",
   srcs = [
     "pjrt_computation_client.cc",
@@ -81,7 +112,10 @@ cc_library(
   deps = [
     ":computation_client",
     ":debug_macros",
+    ":env_hash",
     ":env_vars",
+    ":pjrt_registry",
+    ":operation_manager",
     ":profiler",
     ":stablehlo_helper",
     ":tensor_source",
@@ -92,14 +126,11 @@ cc_library(
     "@xla//xla:shape_util",
     "@xla//xla/client:xla_computation",
     "@xla//xla/pjrt/distributed",
-    "@xla//xla/pjrt/gpu:se_gpu_pjrt_client",
-    "@xla//xla/service:gpu_plugin",
     "@xla//xla/pjrt:pjrt_client",
-    "@xla//xla/pjrt:tfrt_cpu_pjrt_client",
-    "@xla//xla/pjrt:pjrt_c_api_client",
     "@xla//xla/pjrt/c:pjrt_c_api_hdrs",
     "@tsl//tsl/profiler/lib:traceme",
     "@tsl//tsl/platform/cloud:gcs_file_system",
+    "@tsl//tsl/platform:env",
     "@com_google_absl//absl/strings",
     "@com_google_absl//absl/synchronization",
     "@com_google_absl//absl/types:span",
@@ -109,6 +140,9 @@ cc_library(
 cc_library(
     name = "cache",
     hdrs = ["cache.h"],
+    deps = [
+      "@torch//:headers",
+    ],
 )
 
 cc_test(
@@ -116,8 +150,9 @@ cc_test(
     size = "small",
     srcs = ["cache_test.cc"],
     deps = [
-        ":cache",
-        "@com_google_googletest//:gtest_main",
+      ":cache",
+      "@torch//:libtorch_cpu",  # For TORCH_LAZY_COUNTER
+      "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -135,6 +170,46 @@ cc_library(
     name = "env_vars",
     srcs = ["env_vars.cc"],
     hdrs = ["env_vars.h"],
+)
+
+cc_library(
+    name = "env_hash",
+    srcs = ["env_hash.cc"],
+    hdrs = ["env_hash.h"],
+    deps = [
+        ":sys_util",
+        "@torch//:headers",
+    ],
+)
+
+cc_test(
+    name = "env_hash_test",
+    size = "small",
+    srcs = ["env_hash_test.cc"],
+    deps = [
+      ":env_hash",
+      "@torch//:libtorch_cpu",  # For torch::lazy::hash
+      "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+  name = "pjrt_registry",
+  srcs = ["pjrt_registry.cc"],
+  hdrs = ["pjrt_registry.h"],
+  deps = [
+    ":debug_macros",
+    ":env_hash",
+    ":env_vars",
+    ":profiler",
+    ":sys_util",
+    ":tf_logging",
+    ":xla_coordinator",
+    "@xla//xla/service:gpu_plugin",
+    "@xla//xla/pjrt/gpu:se_gpu_pjrt_client",
+    "@xla//xla/pjrt:tfrt_cpu_pjrt_client",
+    "@xla//xla/pjrt:pjrt_c_api_client",
+  ],
 )
 
 cc_library(
@@ -187,6 +262,18 @@ cc_library(
     ],
 )
 
+cc_library(
+  name = "operation_manager",
+  srcs = ["operation_manager.cc"],
+  hdrs = ["operation_manager.h"],
+  visibility = ["//visibility:private"],
+  deps = [
+    ":debug_macros",
+    ":tf_logging",
+    "@com_google_absl//absl/types:span",
+  ],
+)
+
 # Profiler silently fails unless we link these backends
 cc_library(
   name = "profiler_backends",
@@ -205,7 +292,7 @@ cc_library(
     srcs = ["profiler.cc"],
     hdrs = ["profiler.h"],
     deps = [
-      ":debug_macros",
+      ":tf_logging",
       ":profiler_backends",
       "@xla//xla/backends/profiler/plugin:profiler_c_api_hdrs",
       "@xla//xla/backends/profiler/plugin:plugin_tracer",
@@ -227,12 +314,26 @@ cc_library(
 )
 
 cc_library(
+    name = "stablehlo_composite_helper",
+    srcs = ["stablehlo_composite_helper.cc"],
+    hdrs = ["stablehlo_composite_helper.h"],
+    deps = [
+        ":types",
+        ":xla_util",
+        "@com_nlohmann_json//:json",
+        "@xla//xla/mlir_hlo:all_passes",
+    ],
+)
+
+cc_library(
     name = "stablehlo_helper",
     srcs = ["stablehlo_helper.cc"],
     hdrs = ["stablehlo_helper.h"],
     deps = [
         ":types",
         ":xla_util",
+        ":stablehlo_composite_helper",
+        "@stablehlo//:stablehlo_portable_api",
         "@stablehlo//:stablehlo_serialization",
         "@xla//xla/translate/hlo_to_mhlo:hlo_to_mlir_hlo",
         "@xla//xla/translate/mhlo_to_hlo:mlir_hlo_to_hlo",
@@ -362,6 +463,31 @@ ptxla_cc_test(
     deps = [
         ":computation_client",
         ":pjrt_computation_client",
+        ":tensor_source",
+        "@xla//xla:literal",
+        "@xla//xla:literal_util",
+        "@xla//xla:shape_util",
+        "@xla//xla:status",
+        "@xla//xla:statusor",
+        "@xla//xla/client:xla_builder",
+        "@xla//xla/client:xla_computation",
+        "@xla//xla/tests:literal_test_util",
+        "@xla//xla/tools:hlo_module_loader",
+        "@tsl//tsl/lib/core:status_test_util",
+        "@tsl//tsl/platform:env",
+        "@tsl//tsl/platform:errors",
+        "@tsl//tsl/platform:logging",
+        "@tsl//tsl/platform:test",
+        "@tsl//tsl/platform:test_main",
+    ],
+)
+
+ptxla_cc_test(
+    name = "ifrt_computation_client_test",
+    srcs = ["ifrt_computation_client_test.cc"],
+    deps = [
+        ":computation_client",
+        ":ifrt_computation_client",
         ":tensor_source",
         "@xla//xla:literal",
         "@xla//xla:literal_util",

@@ -72,7 +72,7 @@ def is_xla_tensor(tensor):
 
 
 def parse_xla_device(device):
-  m = re.match(r'(CPU|TPU|GPU|ROCM|CUDA|XPU|NEURON):(\d+)$', device)
+  m = re.match(r'([A-Z]+):(\d+)$', device)
   if m:
     return (m.group(1), int(m.group(2)))
 
@@ -81,32 +81,33 @@ def get_xla_supported_devices(devkind=None, max_devices=None):
   """Returns a list of supported devices of a given kind.
 
   Args:
-    devkind (string..., optional): If specified, one of `TPU`, `GPU`, `XPU`, 
-      `NEURON` or `CPU` (the 'GPU' XLA device is currently not implemented).
+    devkind (string..., optional): If specified, a device type such as `TPU`,
+      `CUDA`, `CPU`, or name of custom PJRT device.
     max_devices (int, optional): The maximum number of devices to be returned of
       that kind.
 
   Returns:
     The list of device strings.
   """
-  # TODO(xiowei replace gpu with cuda): Remove the below if statement after r2.2 release.
-  if devkind and devkind.casefold() == 'gpu':
-    warnings.warn(
-        "GPU as a device name is being deprecate. Please replace it with CUDA such as get_xla_supported_devices(devkind='CUDA'). Similarly, please replace PJRT_DEVICE=GPU with PJRT_DEVICE=CUDA."
-    )
-    devkind = 'CUDA'
+  # TODO(wcromar): Remove `devkind` after 2.3 release cut. We no longer support
+  # multiple device types.
+  if not devkind:
+    devices = torch_xla._XLAC._xla_get_devices()
+    return [
+        f'xla:{i}'
+        for i, _ in enumerate(devices[:max_devices] if max_devices else devices)
+    ]
+  else:
+    warnings.warn("`devkind` argument is deprecated and will be removed in a "
+                  "future release.")
 
   xla_devices = _DEVICES.value
-  devkind = [devkind] if devkind else [
-      'TPU', 'GPU', 'XPU', 'NEURON', 'CPU', 'CUDA', 'ROCM'
-  ]
-  for kind in devkind:
-    kind_devices = []
-    for i, device in enumerate(xla_devices):
-      if re.match(kind + r':\d+$', device):
-        kind_devices.append('xla:{}'.format(i))
-    if kind_devices:
-      return kind_devices[:max_devices] if max_devices else kind_devices
+  kind_devices = []
+  for i, device in enumerate(xla_devices):
+    if re.match(devkind + r':\d+$', device):
+      kind_devices.append('xla:{}'.format(i))
+  if kind_devices:
+    return kind_devices[:max_devices] if max_devices else kind_devices
 
 
 def xrt_world_size(defval=1):
@@ -191,8 +192,8 @@ def xla_device(n=None, devkind=None):
     n (int, optional): The specific instance (ordinal) to be returned. If
       specified, the specific XLA device instance will be returned. Otherwise
       the first device of `devkind` will be returned.
-    devkind (string..., optional): If specified, one of `TPU`, `CUDA`, `XPU` 
-      `NEURON`, `ROCM` or `CPU`.
+    devkind (string..., optional): If specified, device type such as `TPU`,
+      `CUDA`, `CPU`, or custom PJRT device. Deprecated.
 
   Returns:
     A `torch.device` with the requested instance.
@@ -215,7 +216,10 @@ def _xla_real_device(device):
   return _DEVICES.value[int(m.group(1))]
 
 
-def xla_real_devices(devices):
+def xla_real_devices(devices: Optional[List[torch.device]] = None):
+  if not devices:
+    devices = get_xla_supported_devices()
+
   return [_xla_real_device(device) for device in devices]
 
 
@@ -227,8 +231,7 @@ def xla_device_hw(device):
       real device.
 
   Returns:
-    A string representation of the hardware type (`CPU`, `TPU`, `XPU`, `NEURON`, `GPU`, `CUDA`, `ROCM`) 
-    of the given device.
+    A string representation of the hardware type of the given device.
   """
   real_device = _xla_real_device(device)
   return real_device.split(':')[0]
@@ -553,9 +556,10 @@ def all_gather(value, dim=0, groups=None, output=None, pin_layout=True):
     A tensor which has, in the ``dim`` dimension, all the values from the
     participating replicas.
   """
-  if pin_layout and (output == None or xla_device_hw(value.device) == 'NEURON'):
-    # There is not an easy way to pin the all_gather layout on TPU, GPU and NEURON,
-    # use all_reduce based all_gather for this purpose.
+  # _all_gather_using_all_reduce does not support list of tensors as input
+  if pin_layout and output == None and isinstance(value, torch.Tensor):
+    # There is not an easy way to pin the all_gather layout, so use all_reduce
+    # based all_gather for this purpose.
     return _all_gather_using_all_reduce(
         value, dim=dim, groups=groups, pin_layout=True)
 
@@ -570,17 +574,50 @@ def all_gather(value, dim=0, groups=None, output=None, pin_layout=True):
     shard_count = xrt_world_size()
 
   token, devctx = _get_all_reduce_token()
-  if output != None:
-    # Call the out of place version of the all_gather
-    new_token = torch_xla._XLAC._xla_all_gather_out(output, value, token, dim,
-                                                    shard_count, groups or [],
-                                                    pin_layout)
-    torch_xla._XLAC._set_all_reduce_token(devctx.device, new_token)
-    return output
 
-  result = torch_xla._XLAC._xla_all_gather(value, dim, shard_count, groups or
-                                           [], pin_layout)
-  return result
+  if isinstance(value, torch.Tensor):
+    if output != None:
+      # Call the out of place version of the all_gather
+      new_token = torch_xla._XLAC._xla_all_gather_out(output, value, token, dim,
+                                                      shard_count, groups or [],
+                                                      pin_layout)
+      torch_xla._XLAC._set_all_reduce_token(devctx.device, new_token)
+      return output
+
+    result = torch_xla._XLAC._xla_all_gather(value, dim, shard_count, groups or
+                                             [], pin_layout)
+    return result
+
+  # Now the input should be a list of Tensors.
+  elif isinstance(value, list) and all(
+      isinstance(v, torch.Tensor) for v in value):
+    if pin_layout:
+      raise RuntimeError(
+          "For xm.all_gather with list of tensors input, pin_layout=True is not yet supported."
+      )
+    if output != None:
+      if not isinstance(output, list) or any(
+          not isinstance(v, torch.Tensor) for v in output):
+        raise TypeError(
+            f"`output` needs to be a list of Tensors, but given {type(output)}."
+        )
+      if len(output) != len(value):
+        raise ValueError("`output` length doesn't match `input` length: "
+                         f"{len(output)} vs {len(input)}.")
+      # Call the out of place version of the reduce_scatter
+      new_token = torch_xla._XLAC._xla_all_gather_coalesced_out(
+          output, value, token, dim, shard_count, groups or [], pin_layout)
+      torch_xla._XLAC._set_all_reduce_token(devctx.device, new_token)
+      return output
+
+    result = torch_xla._XLAC._xla_all_gather_coalesced(value, token, dim,
+                                                       shard_count, groups or
+                                                       [], pin_layout)
+    torch_xla._XLAC._set_all_reduce_token(devctx.device, result[-1])
+    return result[:-1]
+  else:
+    raise TypeError("`value` needs to be a Tensor or a list of Tensors, but "
+                    f"given {type(value)}.")
 
 
 def all_to_all(value,
@@ -726,16 +763,18 @@ def reduce_scatter(reduce_type,
     reduce_type (string): One of ``xm.REDUCE_SUM``, ``xm.REDUCE_MUL``,
       ``xm.REDUCE_AND``, ``xm.REDUCE_OR``, ``xm.REDUCE_MIN`` and
       ``xm.REDUCE_MAX``.
-    input: A single `torch.Tensor` all reduce + scatter op to.
+    input: (torch.Tensor or a list of torch.Tensor): The input. If it's a list, then
+      it will also be the output.
     scale (float): A default scaling value to be applied after the reduce.
     scatter_dim (int): Dimension number to which apply scatter operation.
     shard_count (int): The number of ways to split up the scatter_dim in.
     groups (list): A list of list, representing the replica groups for
-      the `all_reduce()` operation. Example: `[[0, 1, 2, 3], [4, 5, 6, 7]]`
+      the `reduce_scatter()` operation. Example: `[[0, 1, 2, 3], [4, 5, 6, 7]]`
         defines two groups, one with the `[0, 1, 2, 3]` replicas and one with
         the `[4, 5, 6, 7]` replicas. If `None` there will be only one group with
         all the replicas in it.
-    output: Optional output tensor
+    output: Optional output tensor if `input` is a torch.Tensor, or a list of
+      torch.Tensor if `input` is a list of torch.Tensor.
     pin_layout (bool, optional): whether to pin the layout for this communication op.
       Layout pining can prevent potential data corruption when each process that
       participate in the communication has slightly different program, but it might
@@ -748,21 +787,50 @@ def reduce_scatter(reduce_type,
     the same as the input.
   """
   token, devctx = _get_all_reduce_token()
-  if output != None:
-    # Call the out of place version of the reduce_scatter
-    new_token = torch_xla._XLAC._xla_reduce_scatter_out(reduce_type, output,
-                                                        input, token, scale,
-                                                        scatter_dim,
-                                                        shard_count, groups or
-                                                        [], pin_layout)
-    torch_xla._XLAC._set_all_reduce_token(devctx.device, new_token)
-    return output
 
-  result = torch_xla._XLAC._xla_reduce_scatter(reduce_type, input, token, scale,
-                                               scatter_dim, shard_count,
-                                               groups or [], pin_layout)
-  torch_xla._XLAC._set_all_reduce_token(devctx.device, result[1])
-  return result[0]
+  if isinstance(input, torch.Tensor):
+    if output != None:
+      # Call the out of place version of the reduce_scatter
+      new_token = torch_xla._XLAC._xla_reduce_scatter_out(
+          reduce_type, output, input, token, scale, scatter_dim, shard_count,
+          groups or [], pin_layout)
+      torch_xla._XLAC._set_all_reduce_token(devctx.device, new_token)
+      return output
+
+    result = torch_xla._XLAC._xla_reduce_scatter(reduce_type, input, token,
+                                                 scale, scatter_dim,
+                                                 shard_count, groups or [],
+                                                 pin_layout)
+    torch_xla._XLAC._set_all_reduce_token(devctx.device, result[1])
+    return result[0]
+
+  # Now the input should be a list of Tensors.
+  elif isinstance(input, list) and all(
+      isinstance(v, torch.Tensor) for v in input):
+    if output != None:
+      if not isinstance(output, list) or any(
+          not isinstance(v, torch.Tensor) for v in output):
+        raise TypeError(
+            f"`output` needs to be a list of Tensors, but given {type(output)}."
+        )
+      if len(output) != len(input):
+        raise ValueError("`output` length doesn't match `input` length: "
+                         f"{len(output)} vs {len(input)}.")
+      # Call the out of place version of the reduce_scatter
+      new_token = torch_xla._XLAC._xla_reduce_scatter_coalesced_out(
+          reduce_type, output, input, token, scale, scatter_dim, shard_count,
+          groups or [], pin_layout)
+      torch_xla._XLAC._set_all_reduce_token(devctx.device, new_token)
+      return output
+
+    result = torch_xla._XLAC._xla_reduce_scatter_coalesced(
+        reduce_type, input, token, scale, scatter_dim, shard_count, groups or
+        [], pin_layout)
+    torch_xla._XLAC._set_all_reduce_token(devctx.device, result[-1])
+    return result[:-1]
+  else:
+    raise TypeError("`input` needs to be a Tensor or a list of Tensors, but "
+                    f"given {type(input)}.")
 
 
 def add_step_closure(closure, args=(), run_async=False):

@@ -453,8 +453,7 @@ class TestAtenXlaTensor(test_utils.XlaTestCase):
     devices = xm.get_xla_supported_devices()
     xla_devices = torch_xla._XLAC._xla_real_devices(devices)
     for device, xdevice in zip(devices, xla_devices):
-      self.assertTrue(
-          re.match(r'(CPU|GPU|TPU|CUDA|ROCM):\d+$', xdevice) is not None)
+      self.assertIsNotNone(re.fullmatch(r'[A-Z]+:\d+$', xdevice))
 
   def test_negative_slice(self):
     t = _gen_tensor(32, 24, 32)
@@ -1200,6 +1199,13 @@ class TestAtenXlaTensor(test_utils.XlaTestCase):
 
     self.runAtenTest(torch.rand(4, 3), test_fn)
 
+  def test_diagonal_scatter_negative_dim(self):
+
+    def test_fn(input, src):
+      return torch.diagonal_scatter(input, src, 0, dim1=-1, dim2=0)
+
+    self.runAtenTest([torch.zeros(3, 3), torch.ones(3)], test_fn)
+
   def test_scatter_add_bool(self):
     xla_device = xm.xla_device()
     a = torch.tensor([[True, True, True, True, True],
@@ -1649,13 +1655,13 @@ class TestAtenXlaTensor(test_utils.XlaTestCase):
     t3 = torch.randn(1, 3).to(xla_device)
     t1.addcdiv_(t2, t3, value=0.1)
     xm.mark_step()
-    self.assertEqual(met.metric_data("TransferToServerTime")[0], 4)
+    self.assertEqual(met.metric_data("TransferToDeviceTime")[0], 4)
 
-    # The following two scalars shouldn't trigger TransferToServerTime.
+    # The following two scalars shouldn't trigger TransferToDeviceTime.
     t1.addcdiv_(t2, t3, value=0.1)
     t1.addcdiv_(t2, t3, value=0.1)
     xm.mark_step()
-    self.assertEqual(met.metric_data("TransferToServerTime")[0], 4)
+    self.assertEqual(met.metric_data("TransferToDeviceTime")[0], 4)
 
   @skipOnEagerDebug
   def test_print_executation(self):
@@ -2295,6 +2301,16 @@ class TestGeneric(test_utils.XlaTestCase):
     self.assertTrue(isinstance(xdata, nn.utils.rnn.PackedSequence))
     self.assertEqual(xdata.batch_sizes.device, torch.device('cpu'))
     self.assertEqual(xdata.data.device, xla_device)
+
+  def test_as_strided_input_larger(self):
+    size = (5, 5)
+    device = xm.xla_device()
+
+    a = torch.ones(size, device=device)
+    small_a = a[:, ::2]
+    former_a = small_a.as_strided(size, (5, 1), 0)
+
+    self.assertEqual(a, former_a)
 
 
 if __name__ == '__main__':

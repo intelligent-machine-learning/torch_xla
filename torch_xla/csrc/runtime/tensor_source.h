@@ -53,10 +53,14 @@ class AtenSource : public TensorSource {
     at::ScalarType target_torch_type = TorchTypeFromXlaType(primitive_type());
     if (target_torch_type != tensor.type().scalarType()) {
       TORCH_LAZY_COUNTER("AtenSourceDowncasts", 1);
-      tensor_ = std::move(tensor.to(target_torch_type).contiguous());
-    } else {
-      tensor_ = std::move(tensor.contiguous());
     }
+    // TODO(ysiraichi): check, first, if tensor lives in a device that the
+    // current PjRt client has access. If so, we don't need to go through the
+    // CPU.
+    tensor_ = std::move(
+        tensor.to(at::TensorOptions().device(at::kCPU).dtype(target_torch_type),
+                  /*non_blocking=*/false,
+                  /*copy=*/true, at::MemoryFormat::Contiguous));
   }
 
   const void* data() const override { return tensor_.const_data_ptr(); }

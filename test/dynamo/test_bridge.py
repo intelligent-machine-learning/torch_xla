@@ -222,6 +222,16 @@ class TorchXLAReuseGraphTest(torch._dynamo.test_case.TestCase):
   test_training_maxpool = make_training_test(MaxPoolModule)
   test_training_upsample = make_training_test(UpsampleModule)
 
+  def _compile_and_check(self, fn, args, backend="openxla"):
+    r = fn(*args)
+    xm.mark_step()
+
+    compiled_fn = torch.compile(backend=backend)(fn)
+    compiled_r = compiled_fn(*args)
+    xm.mark_step()
+
+    self.assertEqual(r, compiled_r)
+
   def test_non_tensor_args_for_partition(self):
 
     class Emb(torch.nn.Embedding):
@@ -233,12 +243,64 @@ class TorchXLAReuseGraphTest(torch._dynamo.test_case.TestCase):
     module = Emb()
     module.to(device)
 
-    @torch.compile(backend="openxla_eval")
     def foo(x):
       return module(x)
 
     x = torch.randint(0, 10, (10,), device=device)
-    foo(x)
+    self._compile_and_check(foo, (x,), backend="openxla_eval")
+
+  def test_inputs_not_computed(self):
+
+    def foo(x):
+      return x * 2
+
+    device = xm.xla_device()
+    x = torch.rand(5, device=device)
+    x = x.unsqueeze(dim=-1)
+    self._compile_and_check(foo, (x,))
+
+  def test_factory_copy(self):
+
+    def foo(device):
+      return torch.arange(5, device="cpu").to(device)
+
+    self._compile_and_check(foo, (xm.xla_device(),))
+
+  def test_index_flag_unsupported(self):
+    # The indices of the index operation are represented as
+    # a list of objects. If any non-XLA tensors appear, the
+    # index operation should be flagged as unsupported, since
+    # their arguments might be turned into placeholders of the
+    # partition FX graph.
+
+    def foo(xt, t):
+      return xt[t]
+
+    device = xm.xla_device()
+    xt = torch.rand(5, device=device)
+    t = torch.randint(0, 5, (3,))
+    self._compile_and_check(foo, (xt, t))
+
+  def test_stack_flag_unsupported(self):
+    # Explicit list of tensors arguments.
+
+    def foo(t):
+      return torch.stack([t])
+
+    t = torch.randint(0, 5, (3,))
+    self._compile_and_check(foo, (t,))
+
+  def test_cpu_flag_unsupported(self):
+    # Nodes that return CPU tensors should also be flagged as
+    # unsupported, since their outputs could be turned into
+    # outputs of the partition FX graph.
+
+    def foo(t):
+      return t.cpu()
+
+    device = xm.xla_device()
+    t = torch.randint(0, 5, (3,), device=device)
+    self._compile_and_check(foo, (t,))
 
 
 if __name__ == "__main__":

@@ -484,7 +484,7 @@ torch::lazy::BackendDataPtr TensorToXlaData(
       std::make_shared<runtime::AtenSource>(tensor, shape, device.toString()));
 
   auto handles =
-      runtime::GetComputationClient()->TransferToServer(source_tensors);
+      runtime::GetComputationClient()->TransferToDevice(source_tensors);
   XLA_CHECK_EQ(handles.size(), 1);
   return handles.front();
 }
@@ -711,7 +711,7 @@ std::vector<torch::lazy::BackendDataPtr> CreateTensorsData(
         tensors[i], std::move(shape), devices[i]));
   }
   return WrapXlaData(
-      runtime::GetComputationClient()->TransferToServer(source_tensors));
+      runtime::GetComputationClient()->TransferToDevice(source_tensors));
 }
 
 std::vector<torch::lazy::BackendDataPtr> CreateTensorsData(
@@ -747,7 +747,7 @@ std::vector<torch::lazy::BackendDataPtr> CreateTensorsData(
       source_tensors.push_back(std::make_shared<runtime::AtenSource>(
           tensors[i], std::move(shape), devices[i]));
       new_handles =
-          runtime::GetComputationClient()->TransferToServer(source_tensors);
+          runtime::GetComputationClient()->TransferToDevice(source_tensors);
     }
     handles.insert(handles.end(), new_handles.begin(), new_handles.end());
   }
@@ -785,7 +785,7 @@ std::vector<xla::Literal> ReleaseGilAndTransferData(
     save = PyEval_SaveThread();
   }
   std::vector<xla::Literal> literals =
-      runtime::GetComputationClient()->TransferFromServer(
+      runtime::GetComputationClient()->TransferFromDevice(
           UnwrapXlaData(xla_data));
   if (save) {
     PyEval_RestoreThread(save);
@@ -796,13 +796,18 @@ std::vector<xla::Literal> ReleaseGilAndTransferData(
 
 std::vector<at::Tensor> XlaDataToTensors(
     absl::Span<const torch::lazy::BackendDataPtr> xla_data,
-    at::ScalarType dest_element_type) {
+    absl::Span<const at::ScalarType> dest_element_type) {
   std::vector<xla::Literal> literals = ReleaseGilAndTransferData(xla_data);
-  std::vector<at::Tensor> tensors;
-  tensors.reserve(literals.size());
-  for (auto& literal : literals) {
-    tensors.push_back(MakeTensorFromXlaLiteral(literal, dest_element_type));
+  std::vector<at::Tensor> tensors(literals.size());
+  absl::BlockingCounter counter(literals.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    auto copy_fn = [&, i]() {
+      tensors[i] = MakeTensorFromXlaLiteral(literals[i], dest_element_type[i]);
+      counter.DecrementCount();
+    };
+    thread::Schedule(std::move(copy_fn));
   }
+  counter.Wait();
   return tensors;
 }
 

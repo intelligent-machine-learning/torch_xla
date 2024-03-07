@@ -33,6 +33,21 @@ torch::lazy::Value reduce_scatter_out(XLATensorPtr& output,
                                       std::vector<std::vector<int64_t>> groups,
                                       bool pin_layout);
 
+std::pair<std::vector<XLATensorPtr>, torch::lazy::Value>
+reduce_scatter_coalesced(const std::vector<XLATensorPtr>& inputs,
+                         const torch::lazy::Value& token,
+                         AllReduceType reduce_type, double scale,
+                         int64_t scatter_dim, int64_t shard_count,
+                         std::vector<std::vector<int64_t>> groups,
+                         bool pin_layout);
+
+torch::lazy::Value reduce_scatter_coalesced_out(
+    const std::vector<XLATensorPtr>& outputs,
+    const std::vector<XLATensorPtr>& inputs, const torch::lazy::Value& token,
+    AllReduceType reduce_type, double scale, int64_t scatter_dim,
+    int64_t shard_count, std::vector<std::vector<int64_t>> groups,
+    bool pin_layout);
+
 std::pair<XLATensorPtr, torch::lazy::Value> all_to_all(
     const XLATensorPtr& input, const torch::lazy::Value& token,
     int64_t split_dimension, int64_t concat_dimension, int64_t split_count,
@@ -49,6 +64,16 @@ torch::lazy::Value all_gather_out(XLATensorPtr& output,
                                   int64_t shard_count,
                                   std::vector<std::vector<int64_t>> groups,
                                   bool pin_layout);
+
+std::pair<std::vector<XLATensorPtr>, torch::lazy::Value> all_gather_coalesced(
+    const std::vector<XLATensorPtr>& inputs, const torch::lazy::Value& token,
+    int64_t dim, int64_t shard_count, std::vector<std::vector<int64_t>> groups,
+    bool pin_layout);
+
+torch::lazy::Value all_gather_coalesced_out(
+    std::vector<XLATensorPtr>& outputs, const std::vector<XLATensorPtr>& inputs,
+    const torch::lazy::Value& token, int64_t dim, int64_t shard_count,
+    std::vector<std::vector<int64_t>> groups, bool pin_layout);
 
 std::pair<XLATensorPtr, torch::lazy::Value> collective_permute(
     const XLATensorPtr& input, const torch::lazy::Value& token,
@@ -84,6 +109,21 @@ void adam_optimizer_step_(const XLATensorPtr& found_inf, XLATensorPtr& step,
 std::vector<XLATensorPtr> user_computation(
     const std::string& opname, absl::Span<const XLATensorPtr> inputs,
     runtime::ComputationClient::ComputationPtr computation);
+
+//////////////////////////////////////////////////////////////////////////////
+// Quantization related ops here.
+//////////////////////////////////////////////////////////////////////////////
+XLATensorPtr quantize_tensor(const XLATensorPtr& input,
+                             const std::vector<float>& scale_list,
+                             const std::vector<int>& zero_point_list,
+                             int quant_min, int quant_max,
+                             const std::string& dtype, int axis);
+
+XLATensorPtr dequantize_tensor(const XLATensorPtr& input,
+                               const std::vector<float>& scale_list,
+                               const std::vector<int>& zero_point_list,
+                               int quant_min, int quant_max,
+                               const std::string& dtype, int axis);
 
 //////////////////////////////////////////////////////////////////////////////
 // ATEN operators follows here, listed in alphabetical order.
@@ -483,6 +523,8 @@ XLATensorPtr lt(const XLATensorPtr& input, const at::Scalar& other);
 
 XLATensorPtr lt(const XLATensorPtr& input, const XLATensorPtr& other);
 
+XLATensorPtr mark_tensor(const XLATensorPtr& input, const std::string& info);
+
 XLATensorPtr masked_scatter(XLATensorPtr& input, const XLATensorPtr& mask,
                             const XLATensorPtr& source);
 
@@ -775,8 +817,6 @@ std::vector<XLATensorPtr> split(const XLATensorPtr& input, int64_t split_size,
 std::vector<XLATensorPtr> split_with_sizes(const XLATensorPtr& input,
                                            std::vector<int64_t> split_size,
                                            int64_t dim);
-
-XLATensorPtr sqrt(const XLATensorPtr& input);
 
 // Squeeze out all trivial (size 1) dimensions.
 XLATensorPtr squeeze(const XLATensorPtr& input);

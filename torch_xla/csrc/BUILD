@@ -49,6 +49,7 @@ ptxla_cc_library(
         "nll_loss.cpp",
         "nms_op.cpp",
         "pooling.cpp",
+        "quant_util.cpp",
         "random.cpp",
         "reduction.cpp",
         "resize_ops.cpp",
@@ -88,6 +89,7 @@ ptxla_cc_library(
         "nll_loss.h",
         "nms_op.h",
         "pooling.h",
+        "quant_util.h",
         "random.h",
         "reduction.h",
         "resize_ops.h",
@@ -119,6 +121,7 @@ ptxla_cc_library(
         ":layout_manager",
         ":shape_builder",
         ":shape_helper",
+        ":version",
         "//torch_xla/csrc/runtime",
         "//torch_xla/csrc/runtime:stablehlo_helper",
         "//torch_xla/csrc/runtime:xla_util",
@@ -294,10 +297,12 @@ ptxla_cc_library(
     srcs = [
         "ir.cpp",
         "lowering_context.cpp",
+        "stack_frame_index_builder.cpp",
     ],
     hdrs = [
         "ir.h",
         "lowering_context.h",
+        "stack_frame_index_builder.h",
     ],
     deps = [
         ":device",
