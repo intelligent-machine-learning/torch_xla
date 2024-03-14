@@ -1,6 +1,7 @@
 #include "torch_xla/csrc/tensor_methods.h"
 
 #include <ATen/core/Reduction.h>
+#include <cudnn.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/util.h>
@@ -105,6 +106,8 @@
 #include "torch_xla/csrc/ops/rrelu_with_noise.h"
 #include "torch_xla/csrc/ops/rrelu_with_noise_backward.h"
 #include "torch_xla/csrc/ops/scalar.h"
+#include "torch_xla/csrc/ops/scaled_dot_product_attention.h"
+#include "torch_xla/csrc/ops/scaled_dot_product_attention_backward.h"
 #include "torch_xla/csrc/ops/scatter.h"
 #include "torch_xla/csrc/ops/scatter_add.h"
 #include "torch_xla/csrc/ops/scatter_reduce.h"
@@ -2363,6 +2366,158 @@ XLATensorPtr rsub(const XLATensorPtr& input, const at::Scalar& other,
       input->GetDevice());
   return input->CreateFrom(other_xla - alpha_xla * input->GetIrValue(),
                            logical_element_type);
+}
+
+static void check_qkv_layout(const xla::Shape& q_shape,
+                             const xla::Shape& k_shape,
+                             const xla::Shape& v_shape) {
+  XLA_CHECK(q_shape.rank() == 4 && k_shape.rank() == 4 && v_shape.rank() == 4)
+      << "query, key and value should have rank 4.";
+
+  xla::PrimitiveType q_dtype = q_shape.element_type();
+  xla::PrimitiveType k_dtype = k_shape.element_type();
+  xla::PrimitiveType v_dtype = v_shape.element_type();
+
+  XLA_CHECK(q_dtype == k_dtype && q_dtype == v_dtype &&
+            (q_dtype == xla::PrimitiveType::BF16 ||
+             q_dtype == xla::PrimitiveType::F16))
+      << "query, key and value should have same dtype and should be float16 or "
+         "bfloat16";
+
+  const int64_t q_batch = q_shape.dimensions(0);
+  const int64_t q_num_heads = q_shape.dimensions(1);
+  const int64_t q_seq_len = q_shape.dimensions(2);
+  const int64_t q_head_dim = q_shape.dimensions(3);
+
+  const int64_t k_batch = k_shape.dimensions(0);
+  const int64_t k_num_heads = k_shape.dimensions(1);
+  const int64_t k_seq_len = k_shape.dimensions(2);
+  const int64_t k_head_dim = k_shape.dimensions(3);
+
+  const int64_t v_batch = v_shape.dimensions(0);
+  const int64_t v_num_heads = v_shape.dimensions(1);
+  const int64_t v_seq_len = v_shape.dimensions(2);
+  const int64_t v_head_dim = v_shape.dimensions(3);
+
+  XLA_CHECK(q_batch == k_batch && q_batch == v_batch)
+      << "query, key and value should have same batch size.";
+  XLA_CHECK(q_num_heads == k_num_heads && q_num_heads == v_num_heads)
+      << "query, key and value should have same number of heads.";
+  XLA_CHECK(k_seq_len == v_seq_len)
+      << "key and value should have same sequence length.";
+  XLA_CHECK(q_head_dim == k_head_dim && q_head_dim == v_head_dim)
+      << "query, key and value should have same head dimension.";
+  XLA_CHECK(q_seq_len % 64 == 0 && k_seq_len % 64 == 0)
+      << "sequence length should be multiple of 64.";
+}
+
+static std::pair<bool, bool> check_is_flash_attention(
+    const xla::Shape& q_shape, const xla::Shape& k_shape) {
+  const int64_t batch = q_shape.dimensions(0);
+  const int64_t num_heads = q_shape.dimensions(1);
+  const int64_t q_seq_len = q_shape.dimensions(2);
+  const int64_t head_dim = q_shape.dimensions(3);
+
+  const int64_t kv_seq_len = k_shape.dimensions(2);
+
+  bool is_cross_attention = q_seq_len != kv_seq_len;
+  bool is_flash_attention;
+  if (q_seq_len > 512 && kv_seq_len > 512 &&
+      (head_dim == 64 || head_dim == 128)) {
+    // check if flash attention is supported
+    is_flash_attention = true;
+  } else if (q_seq_len <= 512 && kv_seq_len <= 512 && head_dim == 64) {
+    // check if regular fused attention is supported
+    is_flash_attention = false;
+  } else {
+    XLA_ERROR() << "attention with sequence length " << q_seq_len
+                << " and key/value sequence length " << kv_seq_len
+                << " and head dimension " << head_dim << " is not supported.";
+  }
+
+  return {is_flash_attention, is_cross_attention};
+}
+
+static void check_cudnn_version(bool is_flash_attention,
+                                bool is_cross_attention) {
+  size_t cudnn_version = cudnnGetVersion();
+  if (is_flash_attention) {
+    if (is_cross_attention) {
+      XLA_CHECK_GE(cudnn_version, 8904)
+          << "cuDNN >= 8.9.4 required by flash cross attention.";
+    } else {
+      XLA_CHECK_GE(cudnn_version, 8903)
+          << "cuDNN >= 8.9.3 required by flash attention.";
+    }
+  } else {
+    XLA_CHECK_GE(cudnn_version, 8901)
+        << "cuDNN >= 8.9.1 required by fused attention.";
+  }
+}
+
+static bool check_sdpa_input(const XLATensorPtr& query, const XLATensorPtr& key,
+                             const XLATensorPtr& value,
+                             const XLATensorPtr& mask, bool is_causal_mask) {
+  const xla::Shape& q_shape = query->shape().get();
+  const xla::Shape& k_shape = key->shape().get();
+  const xla::Shape& v_shape = value->shape().get();
+
+  check_qkv_layout(q_shape, k_shape, v_shape);
+
+  const auto [is_flash_attention, is_cross_attention] =
+      check_is_flash_attention(q_shape, k_shape);
+
+  check_cudnn_version(is_flash_attention, is_cross_attention);
+
+  if (mask && is_causal_mask) {
+    XLA_ERROR()
+        << "can not apply a mask and generate a causal_mask at the same time.";
+  }
+
+  if (!is_flash_attention && is_causal_mask) {
+    XLA_ERROR() << "can only generate a causal_mask with flash attention.";
+  }
+
+  return is_flash_attention;
+}
+
+std::pair<XLATensorPtr, XLATensorPtr> scaled_dot_product_attention(
+    const XLATensorPtr& query, const XLATensorPtr& key,
+    const XLATensorPtr& value, const XLATensorPtr& mask,
+    const XLATensorPtr& bias, double scale, double dropout_rate, int64_t seed,
+    bool is_causal_mask) {
+  bool is_flash_attention =
+      check_sdpa_input(query, key, value, mask, is_causal_mask);
+
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<ScaledDotProductAttention>(
+      query->GetIrValue(), key->GetIrValue(), value->GetIrValue(),
+      GetOptionalIrValue(mask), GetOptionalIrValue(bias), scale, dropout_rate,
+      seed, is_flash_attention, is_causal_mask);
+  return {query->CreateFrom(torch::lazy::Value(node, 0)),
+          query->CreateFrom(torch::lazy::Value(node, 1))};
+}
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr>
+scaled_dot_product_attention_backward(
+    const XLATensorPtr& query, const XLATensorPtr& key,
+    const XLATensorPtr& value, const XLATensorPtr& activation,
+    const XLATensorPtr& grad_output, const XLATensorPtr& fwd_output,
+    const XLATensorPtr& mask, const XLATensorPtr& bias, double scale,
+    double dropout_rate, int64_t seed, bool is_causal_mask) {
+  bool is_flash_attention =
+      check_sdpa_input(query, key, value, mask, is_causal_mask);
+
+  torch::lazy::NodePtr node =
+      torch::lazy::MakeNode<ScaledDotProductAttentionBackward>(
+          query->GetIrValue(), key->GetIrValue(), value->GetIrValue(),
+          activation->GetIrValue(), grad_output->GetIrValue(),
+          fwd_output->GetIrValue(), GetOptionalIrValue(mask),
+          GetOptionalIrValue(bias), scale, dropout_rate, seed,
+          is_flash_attention, is_causal_mask);
+
+  return std::make_tuple(query->CreateFrom(torch::lazy::Value(node, 0)),
+                         query->CreateFrom(torch::lazy::Value(node, 1)),
+                         query->CreateFrom(torch::lazy::Value(node, 2)));
 }
 
 void copy_(XLATensorPtr& input, XLATensorPtr& src) {

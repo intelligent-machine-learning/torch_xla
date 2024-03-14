@@ -34,6 +34,7 @@ ptxla_cc_library(
         "aten_autograd_ops.cpp",
         "aten_xla_bridge.cpp",
         "aten_xla_type.cpp",
+        "attention.cpp",
         "autocast_mode.cpp",
         "batch_norm.cpp",
         "convert_ops.cpp",
@@ -74,6 +75,7 @@ ptxla_cc_library(
     hdrs = [
         "aten_autograd_ops.h",
         "aten_xla_bridge.h",
+        "attention.h",
         "batch_norm.h",
         "convert_ops.h",
         "convolution.h",

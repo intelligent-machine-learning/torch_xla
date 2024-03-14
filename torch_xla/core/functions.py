@@ -1,3 +1,4 @@
+import math
 import torch
 import torch_xla
 import torch_xla.core.xla_model as xm
@@ -216,3 +217,53 @@ class AllReduceSumLayer(torch.autograd.Function):
   @staticmethod
   def backward(ctx, grad_output):
     return xm.all_reduce(xm.REDUCE_SUM, grad_output)
+
+
+def scaled_dot_product_attention(query,
+                                 key,
+                                 value,
+                                 attn_mask=None,
+                                 dropout_p=0.0,
+                                 is_causal=False,
+                                 scale=None):
+  scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+
+  # return (output, activation)
+  return torch_xla._XLAC._scaled_dot_product_attention(
+      query,
+      key,
+      value,
+      mask=attn_mask,
+      bias=None,
+      scale=scale_factor,
+      dropout_rate=dropout_p,
+      seed=42,
+      is_causal_mask=is_causal)
+
+
+def scaled_dot_product_attention_backward(query,
+                                          key,
+                                          value,
+                                          activation,
+                                          grad_output,
+                                          fwd_output,
+                                          attn_mask=None,
+                                          dropout_p=0.0,
+                                          is_causal=False,
+                                          scale=None):
+  scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+
+  # return (grad_query, grad_key, grad_value)
+  return torch_xla._XLAC._scaled_dot_product_attention_backward(
+      query,
+      key,
+      value,
+      activation,
+      grad_output,
+      fwd_output,
+      mask=attn_mask,
+      bias=None,
+      scale=scale_factor,
+      dropout_rate=dropout_p,
+      seed=42,
+      is_causal_mask=is_causal)

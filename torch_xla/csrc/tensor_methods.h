@@ -750,6 +750,20 @@ XLATensorPtr rsub(
     const XLATensorPtr& input, const at::Scalar& other, const at::Scalar& alpha,
     c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
 
+std::pair<XLATensorPtr, XLATensorPtr> scaled_dot_product_attention(
+    const XLATensorPtr& query, const XLATensorPtr& key,
+    const XLATensorPtr& value, const XLATensorPtr& mask,
+    const XLATensorPtr& bias, double scale, double dropout_rate, int64_t seed,
+    bool is_causal_mask);
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr>
+scaled_dot_product_attention_backward(
+    const XLATensorPtr& query, const XLATensorPtr& key,
+    const XLATensorPtr& value, const XLATensorPtr& activation,
+    const XLATensorPtr& grad_output, const XLATensorPtr& fwd_output,
+    const XLATensorPtr& mask, const XLATensorPtr& bias, double scale,
+    double dropout_rate, int64_t seed, bool is_causal_mask);
+
 void copy_(XLATensorPtr& input, XLATensorPtr& src);
 
 XLATensorPtr scatter(const XLATensorPtr& input, int64_t dim,

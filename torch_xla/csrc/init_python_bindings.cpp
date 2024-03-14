@@ -1088,22 +1088,22 @@ void InitXlaModuleBindings(py::module m) {
            const std::vector<std::string>& devices,
            const std::optional<std::vector<XLATensor::ShardingSpecPtr>>&
                shardings) {
-          std::vector<at::Tensor> result;
-          {
-            NoGilSection nogil;
-            std::vector<at::Tensor> xla_tensors =
-                GetXlaTensorsFromAten(tensors, devices, shardings);
-            result.reserve(xla_tensors.size());
-            for (size_t i = 0; i < xla_tensors.size(); ++i) {
-              result.push_back(torch::autograd::make_variable(
-                  xla_tensors[i],
-                  /*requires_grad=*/tensors.at(i).requires_grad()));
-            }
+        std::vector<at::Tensor> result;
+        {
+          NoGilSection nogil;
+          std::vector<at::Tensor> xla_tensors =
+              GetXlaTensorsFromAten(tensors, devices, shardings);
+          result.reserve(xla_tensors.size());
+          for (size_t i = 0; i < xla_tensors.size(); ++i) {
+            result.push_back(torch::autograd::make_variable(
+                xla_tensors[i],
+                /*requires_grad=*/tensors.at(i).requires_grad()));
           }
-          return result;
-        },
-        py::arg("tensors"), py::arg("devices"),
-        py::arg("shardings") = py::none());
+        }
+        return result;
+      },
+      py::arg("tensors"), py::arg("devices"),
+      py::arg("shardings") = py::none());
   m.def("_xla_get_cpu_tensors", [](const std::vector<at::Tensor>& tensors) {
     std::vector<at::Tensor> result;
     {
@@ -1592,7 +1592,7 @@ void InitXlaModuleBindings(py::module m) {
             runtime::GetComputationClient()->WaitDeviceOps(devices);
           }
         },
-        py::arg("devices"));
+      py::arg("devices"));
   m.def("_xla_counter_names", []() {
     auto counter_names = torch::lazy::GetCounterNames();
     auto xla_counter_names = runtime::metrics::GetCounterNames();
@@ -2092,9 +2092,9 @@ void InitXlaModuleBindings(py::module m) {
                 global_rank, world_size, master_addr, master_port);
           }
         },
-        py::arg("global_rank"), py::arg("world_size"), py::arg("master_addr"),
-        py::arg("master_port") =
-            runtime::XlaCoordinator::kDefaultCoordinatorPort);
+      py::arg("global_rank"), py::arg("world_size"), py::arg("master_addr"),
+      py::arg("master_port") =
+          runtime::XlaCoordinator::kDefaultCoordinatorPort);
   // Create a PreemptionSyncManager for the XlaCoordinator. The
   // PreemptionSyncManager will register a SIGTERM handler as a side effect.
   m.def("_activate_preemption_sync_manager", []() {
@@ -2323,6 +2323,77 @@ void InitXlaModuleBindings(py::module m) {
         [](std::string name, std::string library_path) {
           runtime::RegisterPjRtPlugin(name, library_path);
         });
+  m.def(
+      "_scaled_dot_product_attention",
+      [](const at::Tensor& query, const at::Tensor& key,
+         const at::Tensor& value, const c10::optional<at::Tensor>& mask,
+         const c10::optional<at::Tensor>& bias, double scale,
+         double dropout_rate, int64_t seed, bool is_causal_mask) {
+        at::Tensor output;
+        at::Tensor activation;
+        {
+          XLATensorPtr q_tensor = bridge::GetXlaTensor(query);
+          auto result_tensors = tensor_methods::scaled_dot_product_attention(
+              q_tensor, bridge::GetXlaTensor(key), bridge::GetXlaTensor(value),
+              bridge::GetOrCreateXlaTensor(mask, q_tensor->GetDevice()),
+              bridge::GetOrCreateXlaTensor(bias, q_tensor->GetDevice()), scale,
+              dropout_rate, seed, is_causal_mask);
+          output = bridge::AtenFromXlaTensor(std::move(result_tensors.first));
+          activation =
+              bridge::AtenFromXlaTensor(std::move(result_tensors.second));
+        }
+        auto result_tuple = py::tuple(2);
+        result_tuple[0] =
+            torch::autograd::make_variable(output, /*requires_grad=*/false);
+        result_tuple[1] =
+            torch::autograd::make_variable(activation, /*requires_grad=*/false);
+        return result_tuple;
+      },
+      py::arg("query"), py::arg("key"), py::arg("value"), py::kw_only(),
+      py::arg("mask"), py::arg("bias"), py::arg("scale"),
+      py::arg("dropout_rate"), py::arg("seed"), py::arg("is_causal_mask"));
+  m.def(
+      "_scaled_dot_product_attention_backward",
+      [](const at::Tensor& query, const at::Tensor& key,
+         const at::Tensor& value, const at::Tensor& activation,
+         const at::Tensor& grad_output, const at::Tensor& fwd_output,
+         const c10::optional<at::Tensor>& mask,
+         const c10::optional<at::Tensor>& bias, double scale,
+         double dropout_rate, int64_t seed, bool is_causal_mask) {
+        at::Tensor grad_query;
+        at::Tensor grad_key;
+        at::Tensor grad_value;
+        {
+          XLATensorPtr q_tensor = bridge::GetXlaTensor(query);
+          auto result_tensors =
+              tensor_methods::scaled_dot_product_attention_backward(
+                  q_tensor, bridge::GetXlaTensor(key),
+                  bridge::GetXlaTensor(value), bridge::GetXlaTensor(activation),
+                  bridge::GetXlaTensor(grad_output),
+                  bridge::GetXlaTensor(fwd_output),
+                  bridge::GetOrCreateXlaTensor(mask, q_tensor->GetDevice()),
+                  bridge::GetOrCreateXlaTensor(bias, q_tensor->GetDevice()),
+                  scale, dropout_rate, seed, is_causal_mask);
+          grad_query =
+              bridge::AtenFromXlaTensor(std::move(std::get<0>(result_tensors)));
+          grad_key =
+              bridge::AtenFromXlaTensor(std::move(std::get<1>(result_tensors)));
+          grad_value =
+              bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
+        }
+        auto result_tuple = py::tuple(3);
+        result_tuple[0] =
+            torch::autograd::make_variable(grad_query, /*requires_grad=*/false);
+        result_tuple[1] =
+            torch::autograd::make_variable(grad_key, /*requires_grad=*/false);
+        result_tuple[2] =
+            torch::autograd::make_variable(grad_value, /*requires_grad=*/false);
+        return result_tuple;
+      },
+      py::arg("query"), py::arg("key"), py::arg("value"), py::arg("activation"),
+      py::arg("grad_output"), py::arg("fwd_output"), py::kw_only(),
+      py::arg("mask"), py::arg("bias"), py::arg("scale"),
+      py::arg("dropout_rate"), py::arg("seed"), py::arg("is_causal_mask"));
 }
 }  // namespace
 
