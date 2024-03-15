@@ -96,7 +96,7 @@ XlaOpVector ScaledDotProductAttention::Lower(LoweringContext* loctx) const {
   xla::Shape q_shape = ShapeHelper::ShapeOfXlaOp(q);
   xla::Shape k_shape = ShapeHelper::ShapeOfXlaOp(k);
 
-  // {output, scratch, activation*}
+  // {output, scratch, softmax_stat/activation}
   xla::Shape custom_call_result_shape =
       GetSDPAForwardOutputShape(q_shape, k_shape, is_flash_attention_);
   const xla::Shape& scratch_shape =

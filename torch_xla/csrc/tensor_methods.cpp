@@ -2407,12 +2407,11 @@ static void check_qkv_layout(const xla::Shape& q_shape,
       << "key and value should have same sequence length.";
   XLA_CHECK(q_head_dim == k_head_dim && q_head_dim == v_head_dim)
       << "query, key and value should have same head dimension.";
-  XLA_CHECK(q_seq_len % 64 == 0 && k_seq_len % 64 == 0)
-      << "sequence length should be multiple of 64.";
 }
 
-static std::pair<bool, bool> check_is_flash_attention(
-    const xla::Shape& q_shape, const xla::Shape& k_shape) {
+static bool check_is_flash_attention(const xla::Shape& q_shape,
+                                     const xla::Shape& k_shape, bool has_bias,
+                                     size_t cudnn_version) {
   const int64_t batch = q_shape.dimensions(0);
   const int64_t num_heads = q_shape.dimensions(1);
   const int64_t q_seq_len = q_shape.dimensions(2);
@@ -2420,54 +2419,44 @@ static std::pair<bool, bool> check_is_flash_attention(
 
   const int64_t kv_seq_len = k_shape.dimensions(2);
 
-  bool is_cross_attention = q_seq_len != kv_seq_len;
   bool is_flash_attention;
-  if (q_seq_len > 512 && kv_seq_len > 512 &&
-      (head_dim == 64 || head_dim == 128)) {
-    // check if flash attention is supported
-    is_flash_attention = true;
-  } else if (q_seq_len <= 512 && kv_seq_len <= 512 && head_dim == 64) {
+
+  if (q_seq_len <= 512 && kv_seq_len <= 512 && head_dim == 64 &&
+      q_seq_len % 64 == 0 && kv_seq_len % 64 == 0) {
     // check if regular fused attention is supported
+    // seq_len should be divisible by 64
     is_flash_attention = false;
+  } else if (head_dim <= 128 && head_dim % 8 == 0 &&
+             (!has_bias || q_seq_len % 2 == 0 && kv_seq_len % 2 == 0)) {
+    // check if flash attention is supported
+    // for patterns with bias, seqlen should be divisible by 2
+    is_flash_attention = true;
   } else {
-    XLA_ERROR() << "attention with sequence length " << q_seq_len
-                << " and key/value sequence length " << kv_seq_len
-                << " and head dimension " << head_dim << " is not supported.";
+    XLA_ERROR() << "Unsupported sequence length Q " << q_seq_len << ", KV "
+                << kv_seq_len << " and head_dim " << head_dim << '.';
   }
 
-  return {is_flash_attention, is_cross_attention};
-}
-
-static void check_cudnn_version(bool is_flash_attention,
-                                bool is_cross_attention) {
-  size_t cudnn_version = cudnnGetVersion();
-  if (is_flash_attention) {
-    if (is_cross_attention) {
-      XLA_CHECK_GE(cudnn_version, 8904)
-          << "cuDNN >= 8.9.4 required by flash cross attention.";
-    } else {
-      XLA_CHECK_GE(cudnn_version, 8903)
-          << "cuDNN >= 8.9.3 required by flash attention.";
-    }
-  } else {
-    XLA_CHECK_GE(cudnn_version, 8901)
-        << "cuDNN >= 8.9.1 required by fused attention.";
+  if (is_flash_attention && cudnn_version < 8904) {
+    XLA_ERROR() << "cuDNN >= 8.9.4 required by flash cross attention.";
+  } else if (!is_flash_attention && cudnn_version < 8901) {
+    XLA_ERROR() << "cuDNN >= 8.9.1 required by fused attention.";
   }
+
+  return is_flash_attention;
 }
 
 static bool check_sdpa_input(const XLATensorPtr& query, const XLATensorPtr& key,
                              const XLATensorPtr& value,
-                             const XLATensorPtr& mask, bool is_causal_mask) {
+                             const XLATensorPtr& mask, const XLATensorPtr& bias,
+                             bool is_causal_mask) {
   const xla::Shape& q_shape = query->shape().get();
   const xla::Shape& k_shape = key->shape().get();
   const xla::Shape& v_shape = value->shape().get();
 
   check_qkv_layout(q_shape, k_shape, v_shape);
 
-  const auto [is_flash_attention, is_cross_attention] =
-      check_is_flash_attention(q_shape, k_shape);
-
-  check_cudnn_version(is_flash_attention, is_cross_attention);
+  const bool is_flash_attention =
+      check_is_flash_attention(q_shape, k_shape, bool(bias), cudnnGetVersion());
 
   if (mask && is_causal_mask) {
     XLA_ERROR()
@@ -2487,7 +2476,7 @@ std::pair<XLATensorPtr, XLATensorPtr> scaled_dot_product_attention(
     const XLATensorPtr& bias, double scale, double dropout_rate, int64_t seed,
     bool is_causal_mask) {
   bool is_flash_attention =
-      check_sdpa_input(query, key, value, mask, is_causal_mask);
+      check_sdpa_input(query, key, value, mask, bias, is_causal_mask);
 
   torch::lazy::NodePtr node = torch::lazy::MakeNode<ScaledDotProductAttention>(
       query->GetIrValue(), key->GetIrValue(), value->GetIrValue(),
@@ -2505,7 +2494,7 @@ scaled_dot_product_attention_backward(
     const XLATensorPtr& mask, const XLATensorPtr& bias, double scale,
     double dropout_rate, int64_t seed, bool is_causal_mask) {
   bool is_flash_attention =
-      check_sdpa_input(query, key, value, mask, is_causal_mask);
+      check_sdpa_input(query, key, value, mask, bias, is_causal_mask);
 
   torch::lazy::NodePtr node =
       torch::lazy::MakeNode<ScaledDotProductAttentionBackward>(
