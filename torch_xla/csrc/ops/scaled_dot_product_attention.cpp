@@ -78,45 +78,51 @@ XlaOpVector ScaledDotProductAttention::Lower(LoweringContext* loctx) const {
   xla::XlaOp k = loctx->GetOutputOp(operand(1));
   xla::XlaOp v = loctx->GetOutputOp(operand(2));
 
+  xla::Shape q_shape = ShapeHelper::ShapeOfXlaOp(q);
+  xla::Shape k_shape = ShapeHelper::ShapeOfXlaOp(k);
+
+  // {output, scratch, softmax_stat/activation}
+  xla::Shape result_shape =
+      GetSDPAForwardOutputShape(q_shape, k_shape, is_flash_attention_);
+  const xla::Shape& scratch_shape =
+      xla::ShapeUtil::MakeShape(xla::PrimitiveType::U8, {16});
+  result_shape.mutable_tuple_shapes()->insert(
+      result_shape.tuple_shapes().begin() + 1, scratch_shape);
+
   bool has_mask = false;
   bool has_bias = false;
   bool has_dropout = dropout_rate_ > 0;
 
   // {Q, K, V, mask*, bias*}
-  std::vector<xla::XlaOp> inputs = {q, k, v};
+  std::vector<xla::XlaOp> call_operands = {q, k, v};
   if (operands().size() > 3) {
-    inputs.push_back(loctx->GetOutputOp(operand(3)));
+    call_operands.push_back(loctx->GetOutputOp(operand(3)));
     has_mask = true;
   }
   if (operands().size() > 4) {
-    inputs.push_back(loctx->GetOutputOp(operand(4)));
+    call_operands.push_back(loctx->GetOutputOp(operand(4)));
     has_bias = true;
   }
 
-  xla::Shape q_shape = ShapeHelper::ShapeOfXlaOp(q);
-  xla::Shape k_shape = ShapeHelper::ShapeOfXlaOp(k);
+  const std::string& call_target_name = GetfMHACustomCallName(
+      /*is_backward=*/false, has_mask, has_bias, has_dropout);
 
-  // {output, scratch, softmax_stat/activation}
-  xla::Shape custom_call_result_shape =
-      GetSDPAForwardOutputShape(q_shape, k_shape, is_flash_attention_);
-  const xla::Shape& scratch_shape =
-      xla::ShapeUtil::MakeShape(xla::PrimitiveType::U8, {16});
-  custom_call_result_shape.mutable_tuple_shapes()->insert(
-      custom_call_result_shape.tuple_shapes().begin() + 1, scratch_shape);
+  const std::string& backend_config = GetfMHABackendConfig(
+      /*batch*/ q_shape.dimensions(0),
+      /*num_heads=*/q_shape.dimensions(1),
+      /*q_seq_len=*/q_shape.dimensions(2),
+      /*kv_seq_len=*/k_shape.dimensions(2),
+      /*dtype=*/q_shape.element_type(), scale_, dropout_rate_, seed_,
+      is_flash_attention_, is_causal_mask_,
+      /*is_backward=*/false);
 
   xla::XlaOp custom_call_result = xla::CustomCall(
-      q.builder(),
-      GetfMHACustomCallName(/*is_backward*/ false, has_mask, has_bias,
-                            has_dropout),
-      inputs, custom_call_result_shape,
-      GetfMHABackendConfig(
-          /*batch*/ q_shape.dimensions(0),
-          /*num_heads*/ q_shape.dimensions(1),
-          /*q_seq_len*/ q_shape.dimensions(2),
-          /*kv_seq_len*/ k_shape.dimensions(2),
-          /*dtype*/ q_shape.element_type(), scale_, dropout_rate_, seed_,
-          is_flash_attention_, is_causal_mask_,
-          /*is_backward*/ false));
+      q.builder(), call_target_name, call_operands, result_shape,
+      backend_config,
+      /*has_side_effect=*/false,
+      /*output_operand_aliasing=*/{}, /*literal=*/nullptr,
+      /*schedule=*/xla::CustomCallSchedule::SCHEDULE_NONE,
+      /*api_version=*/xla::CustomCallApiVersion::API_VERSION_STATUS_RETURNING);
 
   return ReturnOps({xla::GetTupleElement(custom_call_result, 0),
                     xla::GetTupleElement(custom_call_result, 2)},

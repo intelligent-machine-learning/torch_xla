@@ -121,7 +121,15 @@ std::string GetfMHABackendConfig(int64_t batch, int64_t num_heads,
   };
   json intermediate_tensor_shape = {
       {"element_type", xla::PrimitiveType_Name(dtype)},
-      {"dimensions", {batch, num_heads, q_seq_len, kv_seq_len}},
+      {
+          "dimensions",
+          {
+              std::to_string(batch),
+              std::to_string(num_heads),
+              std::to_string(q_seq_len),
+              std::to_string(kv_seq_len),
+          },
+      },
       {"tuple_shapes", json::array()},
       {
           "layout",

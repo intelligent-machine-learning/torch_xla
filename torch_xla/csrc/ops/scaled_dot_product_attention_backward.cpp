@@ -67,32 +67,13 @@ XlaOpVector ScaledDotProductAttentionBackward::Lower(
   xla::XlaOp activation = loctx->GetOutputOp(operand(3));
   xla::XlaOp grad_output = loctx->GetOutputOp(operand(4));
 
-  bool has_mask = false;
-  bool has_bias = false;
-  bool has_dropout = dropout_rate_ > 0;
-
-  // {Q, K, V, activation, dO, mask*, bias*, O*}
-  std::vector<xla::XlaOp> inputs = {q, k, v, activation, grad_output};
-  if (operands().size() > 6) {
-    inputs.push_back(loctx->GetOutputOp(operand(6)));
-    has_mask = true;
-  }
-  if (operands().size() > 7 && is_flash_attention_) {
-    inputs.push_back(loctx->GetOutputOp(operand(7)));
-    has_bias = true;
-  }
-  if (is_flash_attention_) {
-    xla::XlaOp fwd_output = loctx->GetOutputOp(operand(5));
-    inputs.push_back(fwd_output);
-  }
-
   const xla::Shape& q_shape = ShapeHelper::ShapeOfXlaOp(q);
   const xla::Shape& k_shape = ShapeHelper::ShapeOfXlaOp(k);
   const xla::Shape& v_shape = ShapeHelper::ShapeOfXlaOp(v);
   const xla::Shape& activation_shape = ShapeHelper::ShapeOfXlaOp(activation);
 
   // {dQ, dK, dV, d_S*, softmax_sum*, d_Q_accum*, scratch, dbias*}
-  xla::Shape custom_call_result_shape =
+  xla::Shape result_shape =
       GetSDPABackwardOutputShape(q_shape, k_shape, v_shape);
   if (is_flash_attention_) {
     const int64_t batch = q_shape.dimensions(0);
@@ -102,31 +83,54 @@ XlaOpVector ScaledDotProductAttentionBackward::Lower(
         xla::PrimitiveType::F32, {batch, num_heads, q_seq_len});
     const xla::Shape& d_Q_accum_shape =
         xla::ShapeUtil::ChangeElementType(q_shape, xla::PrimitiveType::F32);
-    xla::ShapeUtil::AppendShapeToTuple(softmax_sum_shape,
-                                       &custom_call_result_shape);
-    xla::ShapeUtil::AppendShapeToTuple(d_Q_accum_shape,
-                                       &custom_call_result_shape);
+    xla::ShapeUtil::AppendShapeToTuple(softmax_sum_shape, &result_shape);
+    xla::ShapeUtil::AppendShapeToTuple(d_Q_accum_shape, &result_shape);
   } else {
     const xla::Shape& dS_shape = activation_shape;
-    xla::ShapeUtil::AppendShapeToTuple(dS_shape, &custom_call_result_shape);
+    xla::ShapeUtil::AppendShapeToTuple(dS_shape, &result_shape);
   }
   const xla::Shape& scratch_shape =
       xla::ShapeUtil::MakeShape(xla::PrimitiveType::U8, {16});
-  xla::ShapeUtil::AppendShapeToTuple(scratch_shape, &custom_call_result_shape);
+  xla::ShapeUtil::AppendShapeToTuple(scratch_shape, &result_shape);
+
+  bool has_mask = false;
+  bool has_bias = false;
+  bool has_dropout = dropout_rate_ > 0;
+
+  // {Q, K, V, activation, dO, mask*, bias*, O*}
+  std::vector<xla::XlaOp> call_operands = {q, k, v, activation, grad_output};
+  if (operands().size() > 6) {
+    call_operands.push_back(loctx->GetOutputOp(operand(6)));
+    has_mask = true;
+  }
+  if (operands().size() > 7 && is_flash_attention_) {
+    call_operands.push_back(loctx->GetOutputOp(operand(7)));
+    has_bias = true;
+  }
+  if (is_flash_attention_) {
+    xla::XlaOp fwd_output = loctx->GetOutputOp(operand(5));
+    call_operands.push_back(fwd_output);
+  }
+
+  const std::string& call_target_name = GetfMHACustomCallName(
+      /*is_backward=*/true, has_mask, has_bias, has_dropout);
+
+  const std::string& backend_config = GetfMHABackendConfig(
+      /*batch=*/q_shape.dimensions(0),
+      /*num_heads=*/q_shape.dimensions(1),
+      /*q_seq_len=*/q_shape.dimensions(2),
+      /*kv_seq_len=*/k_shape.dimensions(2),
+      /*dtype=*/q_shape.element_type(), scale_, dropout_rate_, seed_,
+      is_flash_attention_, is_causal_mask_,
+      /*is_backward=*/true);
 
   xla::XlaOp custom_call_result = xla::CustomCall(
-      q.builder(),
-      GetfMHACustomCallName(/*is_backward*/ true, has_mask, has_bias,
-                            has_dropout),
-      inputs, custom_call_result_shape,
-      GetfMHABackendConfig(
-          /*batch*/ q_shape.dimensions(0),
-          /*num_heads*/ q_shape.dimensions(1),
-          /*q_seq_len*/ q_shape.dimensions(2),
-          /*kv_seq_len*/ k_shape.dimensions(2),
-          /*dtype*/ q_shape.element_type(), scale_, dropout_rate_, seed_,
-          is_flash_attention_, is_causal_mask_,
-          /*is_backward*/ true));
+      q.builder(), call_target_name, call_operands, result_shape,
+      backend_config,
+      /*has_side_effect=*/false,
+      /*output_operand_aliasing=*/{}, /*literal=*/nullptr,
+      /*schedule=*/xla::CustomCallSchedule::SCHEDULE_NONE,
+      /*api_version=*/xla::CustomCallApiVersion::API_VERSION_STATUS_RETURNING);
 
   return ReturnOps({xla::GetTupleElement(custom_call_result, 0),
                     xla::GetTupleElement(custom_call_result, 1),
