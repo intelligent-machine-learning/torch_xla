@@ -15,6 +15,7 @@ cc_binary(
     linkopts = [
         "-Wl,-rpath,$$ORIGIN/torch_xla/lib",  # for libtpu
         "-Wl,-soname,_XLAC.so",
+        "-Wl,--allow-multiple-definition",
         "-lstdc++fs",  # For std::filesystem
     ],
     linkshared = 1,
