@@ -3237,7 +3237,7 @@ at::Tensor XLANativeFunctions::upsample_bicubic2d(
   XlaDeviceType hw_type =
       static_cast<XlaDeviceType>(self_tensor->GetDevice().type());
   // NOT GPU
-  if (hw_type != XlaDeviceType::CUDA && hw_type != XlaDeviceType::GPU) {
+  if (hw_type != XlaDeviceType::CUDA) {
     return at::native::call_fallback_fn<
         &xla_cpu_fallback, ATEN_OP(upsample_bicubic2d)>::call(self, output_size,
                                                               align_corners,
@@ -3271,7 +3271,7 @@ at::Tensor XLANativeFunctions::upsample_bicubic2d_backward(
   // NOT GPU
   XlaDeviceType hw_type =
       static_cast<XlaDeviceType>(grad_output_tensor->GetDevice().type());
-  if (hw_type != XlaDeviceType::CUDA && hw_type != XlaDeviceType::GPU) {
+  if (hw_type != XlaDeviceType::CUDA) {
     return at::native::call_fallback_fn<
         &xla_cpu_fallback,
         ATEN_OP(upsample_nearest2d_backward)>::call(grad_output, output_size,
