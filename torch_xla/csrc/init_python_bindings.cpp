@@ -1061,6 +1061,164 @@ void InitXlaModuleBindings(py::module m) {
   m.def("_xla_computation_cache_is_initialized", []() {
     return XLAGraphExecutor::Get()->IsComputationCacheInitialized();
   });
+  m.def(
+      "_xla_flash_attn_fwd",
+      [](const at::Tensor& query, const at::Tensor& key,
+         const at::Tensor& value, float dropout_rate, float scale,
+         bool is_causal, const c10::optional<at::Tensor>& alibi_slopes,
+         bool return_softmax) {
+        XLATensorPtr xla_query = bridge::GetXlaTensor(query);
+        XLA_CHECK(xla_query);
+        auto result_tensors = tensor_methods::flash_attn_fwd(
+            xla_query, bridge::GetXlaTensor(key), bridge::GetXlaTensor(value),
+            dropout_rate, scale, is_causal,
+            bridge::GetOrCreateXlaTensor(alibi_slopes, xla_query->GetDevice()),
+            return_softmax);
+        at::Tensor output =
+            bridge::AtenFromXlaTensor(std::move(std::get<0>(result_tensors)));
+        at::Tensor softmax_lse =
+            bridge::AtenFromXlaTensor(std::move(std::get<1>(result_tensors)));
+        at::Tensor rng_state =
+            bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+
+        auto result_tuple = py::make_tuple(
+            torch::autograd::make_variable(output, query.requires_grad()),
+            torch::autograd::make_variable(softmax_lse,
+                                           /*requires_grad=*/false),
+            py::none(),
+            torch::autograd::make_variable(rng_state, /*requires_grad=*/false));
+        if (return_softmax) {
+          at::Tensor s_dmask =
+              bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
+          result_tuple[2] = torch::autograd::make_variable(s_dmask, false);
+        }
+        return result_tuple;
+      },
+      py::arg("query"), py::arg("key"), py::arg("value"), py::kw_only(),
+      py::arg("dropout_rate"), py::arg("scale"), py::arg("is_causal"),
+      py::arg("alibi_slopes"), py::arg("return_softmax"));
+  m.def(
+      "_xla_flash_attn_varlen_fwd",
+      [](const at::Tensor& query, const at::Tensor& key,
+         const at::Tensor& value, const at::Tensor& cu_seqlens_query,
+         const at::Tensor& cu_seqlens_key, int max_seqlen_q, int max_seqlen_k,
+         float dropout_rate, float scale, bool is_causal,
+         const c10::optional<at::Tensor>& alibi_slopes, bool return_softmax) {
+        XLATensorPtr xla_query = bridge::GetXlaTensor(query);
+        XLA_CHECK(xla_query);
+        auto result_tensors = tensor_methods::flash_attn_varlen_fwd(
+            xla_query, bridge::GetXlaTensor(key), bridge::GetXlaTensor(value),
+            bridge::GetXlaTensor(cu_seqlens_query),
+            bridge::GetXlaTensor(cu_seqlens_key), max_seqlen_q, max_seqlen_k,
+            dropout_rate, scale, is_causal,
+            bridge::GetOrCreateXlaTensor(alibi_slopes, xla_query->GetDevice()),
+            return_softmax);
+        at::Tensor output =
+            bridge::AtenFromXlaTensor(std::move(std::get<0>(result_tensors)));
+        at::Tensor softmax_lse =
+            bridge::AtenFromXlaTensor(std::move(std::get<1>(result_tensors)));
+        at::Tensor rng_state =
+            bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+
+        auto result_tuple = py::make_tuple(
+            torch::autograd::make_variable(output, query.requires_grad()),
+            torch::autograd::make_variable(softmax_lse,
+                                           /*requires_grad=*/false),
+            py::none(),
+            torch::autograd::make_variable(rng_state, /*requires_grad=*/false));
+        if (return_softmax) {
+          at::Tensor s_dmask =
+              bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
+          result_tuple[2] = torch::autograd::make_variable(s_dmask, false);
+        }
+        return result_tuple;
+      },
+      py::arg("query"), py::arg("key"), py::arg("value"),
+      py::arg("cu_seqlens_query"), py::arg("cu_seqlens_key"), py::kw_only(),
+      py::arg("max_seqlen_q"), py::arg("max_seqlen_k"), py::arg("dropout_rate"),
+      py::arg("scale"), py::arg("is_causal"), py::arg("alibi_slopes"),
+      py::arg("return_softmax"));
+  m.def(
+      "_xla_flash_attn_bwd",
+      [](const at::Tensor& grad_output, const at::Tensor& query,
+         const at::Tensor& key, const at::Tensor& value,
+         const at::Tensor& output, const at::Tensor& softmax_lse,
+         const at::Tensor& rng_state, float dropout_rate, float scale,
+         bool is_causal, const c10::optional<at::Tensor>& alibi_slopes,
+         bool deterministic) {
+        XLATensorPtr xla_query = bridge::GetXlaTensor(query);
+        XLA_CHECK(xla_query);
+        const auto& device = xla_query->GetDevice();
+        auto result_tensors = tensor_methods::flash_attn_bwd(
+            bridge::GetXlaTensor(grad_output), xla_query,
+            bridge::GetXlaTensor(key), bridge::GetXlaTensor(value),
+            bridge::GetXlaTensor(output), bridge::GetXlaTensor(softmax_lse),
+            bridge::GetXlaTensor(rng_state), dropout_rate, scale, is_causal,
+            bridge::GetOrCreateXlaTensor(alibi_slopes, device), deterministic);
+        at::Tensor grad_query =
+            bridge::AtenFromXlaTensor(std::move(std::get<0>(result_tensors)));
+        at::Tensor grad_key =
+            bridge::AtenFromXlaTensor(std::move(std::get<1>(result_tensors)));
+        at::Tensor grad_value =
+            bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
+        at::Tensor grad_softmax =
+            bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+
+        return py::make_tuple(
+            torch::autograd::make_variable(grad_query, /*requires_grad=*/false),
+            torch::autograd::make_variable(grad_key, /*requires_grad=*/false),
+            torch::autograd::make_variable(grad_value, /*requires_grad=*/false),
+            torch::autograd::make_variable(grad_softmax,
+                                           /*requires_grad=*/false));
+      },
+      py::arg("grad_output"), py::arg("query"), py::arg("key"),
+      py::arg("value"), py::arg("output"), py::arg("softmax_lse"),
+      py::arg("rng_state"), py::kw_only(), py::arg("dropout_rate"),
+      py::arg("scale"), py::arg("is_causal"), py::arg("alibi_slopes"),
+      py::arg("deterministic"));
+  m.def(
+      "_xla_flash_attn_varlen_bwd",
+      [](const at::Tensor& grad_output, const at::Tensor& query,
+         const at::Tensor& key, const at::Tensor& value,
+         const at::Tensor& output, const at::Tensor& softmax_lse,
+         const at::Tensor& rng_state, const at::Tensor& cu_seqlens_query,
+         const at::Tensor& cu_seqlens_key, int max_seqlen_q, int max_seqlen_k,
+         float dropout_rate, float scale, bool is_causal,
+         const c10::optional<at::Tensor>& alibi_slopes, bool deterministic) {
+        XLATensorPtr xla_query = bridge::GetXlaTensor(query);
+        XLA_CHECK(xla_query);
+        const auto& device = xla_query->GetDevice();
+        auto result_tensors = tensor_methods::flash_attn_varlen_bwd(
+            bridge::GetXlaTensor(grad_output), xla_query,
+            bridge::GetXlaTensor(key), bridge::GetXlaTensor(value),
+            bridge::GetXlaTensor(output), bridge::GetXlaTensor(softmax_lse),
+            bridge::GetXlaTensor(rng_state),
+            bridge::GetXlaTensor(cu_seqlens_query),
+            bridge::GetXlaTensor(cu_seqlens_key), max_seqlen_q, max_seqlen_k,
+            dropout_rate, scale, is_causal,
+            bridge::GetOrCreateXlaTensor(alibi_slopes, device), deterministic);
+        at::Tensor grad_query =
+            bridge::AtenFromXlaTensor(std::move(std::get<0>(result_tensors)));
+        at::Tensor grad_key =
+            bridge::AtenFromXlaTensor(std::move(std::get<1>(result_tensors)));
+        at::Tensor grad_value =
+            bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
+        at::Tensor grad_softmax =
+            bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+
+        return py::make_tuple(
+            torch::autograd::make_variable(grad_query, /*requires_grad=*/false),
+            torch::autograd::make_variable(grad_key, /*requires_grad=*/false),
+            torch::autograd::make_variable(grad_value, /*requires_grad=*/false),
+            torch::autograd::make_variable(grad_softmax,
+                                           /*requires_grad=*/false));
+      },
+      py::arg("grad_output"), py::arg("query"), py::arg("key"),
+      py::arg("value"), py::arg("output"), py::arg("softmax_lse"),
+      py::arg("rng_state"), py::arg("cu_seqlens_query"),
+      py::arg("cu_seqlens_key"), py::kw_only(), py::arg("max_seqlen_q"),
+      py::arg("max_seqlen_k"), py::arg("dropout_rate"), py::arg("scale"),
+      py::arg("is_causal"), py::arg("alibi_slopes"), py::arg("deterministic"));
   m.def("_get_git_revs", []() { return GetRevisions(); });
   m.def("_get_xla_tensor_dimension_size",
         [](const at::Tensor& tensor, int dim) {

@@ -386,6 +386,41 @@ void eye_out(XLATensorPtr& out, int64_t lines, int64_t cols);
 // Fills the input with the given value.
 void fill_(XLATensorPtr& input, const at::Scalar& value);
 
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_fwd(const XLATensorPtr& query, const XLATensorPtr& key,
+               const XLATensorPtr& value, float dropout_rate, float scale,
+               bool is_causal, const XLATensorPtr& alibi_slopes,
+               bool return_softmax);
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_varlen_fwd(const XLATensorPtr& query, const XLATensorPtr& key,
+                      const XLATensorPtr& value,
+                      const XLATensorPtr& cu_seqlens_query,
+                      const XLATensorPtr& cu_seqlens_key, int max_seqlen_q,
+                      int max_seqlen_k, float dropout_rate, float scale,
+                      bool is_causal, const XLATensorPtr& alibi_slopes,
+                      bool return_softmax);
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_bwd(const XLATensorPtr& grad_output, const XLATensorPtr& query,
+               const XLATensorPtr& key, const XLATensorPtr& value,
+               const XLATensorPtr& output, const XLATensorPtr& softmax_lse,
+               const XLATensorPtr& rng_state, float dropout_rate, float scale,
+               bool is_causal, const XLATensorPtr& alibi_slopes,
+               bool deterministic);
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_varlen_bwd(const XLATensorPtr& grad_output,
+                      const XLATensorPtr& query, const XLATensorPtr& key,
+                      const XLATensorPtr& value, const XLATensorPtr& output,
+                      const XLATensorPtr& softmax_lse,
+                      const XLATensorPtr& rng_state,
+                      const XLATensorPtr& cu_seqlens_query,
+                      const XLATensorPtr& cu_seqlens_key, int max_seqlen_q,
+                      int max_seqlen_k, float dropout_rate, float scale,
+                      bool is_causal, const XLATensorPtr& alibi_slopes,
+                      bool deterministic);
+
 // Flips (reverses) the values in the dimensions of the input tensor.
 XLATensorPtr flip(const XLATensorPtr& input, absl::Span<const int64_t> dims);
 
