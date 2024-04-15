@@ -1034,18 +1034,18 @@ void InitXlaModuleBindings(py::module m) {
         at::Tensor softmax_lse =
             bridge::AtenFromXlaTensor(std::move(std::get<1>(result_tensors)));
         at::Tensor rng_state =
-            bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+            bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
 
         auto result_tuple = py::make_tuple(
             torch::autograd::make_variable(output, query.requires_grad()),
             torch::autograd::make_variable(softmax_lse,
                                            /*requires_grad=*/false),
-            py::none(),
-            torch::autograd::make_variable(rng_state, /*requires_grad=*/false));
+            torch::autograd::make_variable(rng_state, /*requires_grad=*/false),
+            py::none());
         if (return_softmax) {
           at::Tensor s_dmask =
-              bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
-          result_tuple[2] = torch::autograd::make_variable(s_dmask, false);
+              bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+          result_tuple[3] = torch::autograd::make_variable(s_dmask, false);
         }
         return result_tuple;
       },
@@ -1073,18 +1073,18 @@ void InitXlaModuleBindings(py::module m) {
         at::Tensor softmax_lse =
             bridge::AtenFromXlaTensor(std::move(std::get<1>(result_tensors)));
         at::Tensor rng_state =
-            bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+            bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
 
         auto result_tuple = py::make_tuple(
             torch::autograd::make_variable(output, query.requires_grad()),
             torch::autograd::make_variable(softmax_lse,
                                            /*requires_grad=*/false),
-            py::none(),
-            torch::autograd::make_variable(rng_state, /*requires_grad=*/false));
+            torch::autograd::make_variable(rng_state, /*requires_grad=*/false),
+            py::none());
         if (return_softmax) {
           at::Tensor s_dmask =
-              bridge::AtenFromXlaTensor(std::move(std::get<2>(result_tensors)));
-          result_tuple[2] = torch::autograd::make_variable(s_dmask, false);
+              bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
+          result_tuple[3] = torch::autograd::make_variable(s_dmask, false);
         }
         return result_tuple;
       },

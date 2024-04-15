@@ -286,10 +286,11 @@ def _flash_attn_bwd(
     deterministic=False,
 ):
   maybe_contiguous = lambda x: x.contiguous() if not x.is_contiguous() else x
-  grad_output, query, key, value, output = [
-      maybe_contiguous(x) for x in (grad_output, query, key, value, output)
+  grad_output, query, key, value, output, softmax_lse = [
+      maybe_contiguous(x)
+      for x in (grad_output, query, key, value, output, softmax_lse)
   ]
-  grad_query, grad_key, grad_value, softmax_d, = torch_xla._XLAC._xla_flash_attn_bwd(
+  grad_query, grad_key, grad_value, grad_softmax = torch_xla._XLAC._xla_flash_attn_bwd(
       grad_output,
       query,
       key,
@@ -303,7 +304,7 @@ def _flash_attn_bwd(
       alibi_slopes=alibi_slopes,
       deterministic=deterministic,
   )
-  return grad_query, grad_key, grad_value, softmax_d
+  return grad_query, grad_key, grad_value, grad_softmax
 
 
 def _flash_attn_varlen_bwd(
@@ -329,7 +330,7 @@ def _flash_attn_varlen_bwd(
   grad_output, query, key, value, output = [
       maybe_contiguous(x) for x in (grad_output, query, key, value, output)
   ]
-  grad_query, grad_key, grad_value, softmax_d, = torch_xla._XLAC._xla_flash_attn_varlen_bwd(
+  grad_query, grad_key, grad_value, grad_softmax, = torch_xla._XLAC._xla_flash_attn_varlen_bwd(
       grad_output,
       query,
       key,
@@ -347,7 +348,7 @@ def _flash_attn_varlen_bwd(
       alibi_slopes=alibi_slopes,
       deterministic=deterministic,
   )
-  return grad_query, grad_key, grad_value, softmax_d
+  return grad_query, grad_key, grad_value, grad_softmax
 
 
 class FlashAttn(torch.autograd.Function):
@@ -367,7 +368,7 @@ class FlashAttn(torch.autograd.Function):
   ):
     if scale is None:
       scale = query.shape[-1]**(-0.5)
-    output, softmax_lse, S_dmask, rng_state = _flash_attn_fwd(
+    output, softmax_lse, rng_state, S_dmask = _flash_attn_fwd(
         query,
         key,
         value,
@@ -425,7 +426,7 @@ class FlashAttnVarLen(torch.autograd.Function):
   ):
     if scale is None:
       scale = query.shape[-1]**(-0.5)
-    output, softmax_lse, S_dmask, rng_state = _flash_attn_varlen_fwd(
+    output, softmax_lse, rng_state, S_dmask = _flash_attn_varlen_fwd(
         query,
         key,
         value,

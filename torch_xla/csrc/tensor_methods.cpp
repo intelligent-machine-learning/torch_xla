@@ -1310,13 +1310,12 @@ flash_attn_fwd_internal(const XLATensorPtr& query, const XLATensorPtr& key,
   XLATensorPtr output = XLATensor::Create(torch::lazy::Value(node, 0), device);
   XLATensorPtr softmax_lse =
       XLATensor::Create(torch::lazy::Value(node, 1), device);
-  XLATensorPtr s_dmask =
-      return_softmax ? XLATensor::Create(torch::lazy::Value(node, 2), device)
-                     : XLATensorPtr();
   XLATensorPtr rng_state =
+      XLATensor::Create(torch::lazy::Value(node, 2), device);
+  XLATensorPtr s_dmask =
       return_softmax ? XLATensor::Create(torch::lazy::Value(node, 3), device)
-                     : XLATensor::Create(torch::lazy::Value(node, 2), device);
-  return std::make_tuple(output, softmax_lse, s_dmask, rng_state);
+                     : XLATensorPtr();
+  return std::make_tuple(output, softmax_lse, rng_state, s_dmask);
 }
 
 std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>

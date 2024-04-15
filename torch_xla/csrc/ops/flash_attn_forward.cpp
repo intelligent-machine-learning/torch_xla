@@ -34,6 +34,15 @@ static xla::Shape GetFlashAttnFwdResultShape(
   const int64_t seqlen_q_rounded = RoundMultiple(seqlen_q, 128);
   const int64_t seqlen_k_rounded = RoundMultiple(seqlen_k, 128);
 
+  std::vector<xla::Shape> result_shape = {
+      // output shape
+      q_shape,
+      // softmax lse shape
+      xla::ShapeUtil::MakeShape(xla::PrimitiveType::F32,
+                                {batch_size, num_heads, seqlen_q}),
+      // rng state shape
+      xla::ShapeUtil::MakeShape(xla::PrimitiveType::U64, {2}),
+  };
   // output_shape is same as the q_shape
   const xla::Shape& output_shape = q_shape;
   const xla::Shape& softmax_lse_shape = xla::ShapeUtil::MakeShape(
@@ -41,16 +50,13 @@ static xla::Shape GetFlashAttnFwdResultShape(
   const xla::Shape& rng_state_shape =
       xla::ShapeUtil::MakeShape(xla::PrimitiveType::U64, {2});
   if (return_softmax) {
-    const xla::Shape& s_dmask_shape = xla::ShapeUtil::MakeShape(
+    // S_dmask shape
+    result_shape.emplace_back(xla::ShapeUtil::MakeShape(
         q_shape.element_type(),
-        {batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded});
-    // {output, softmax_lse, S_dmask, rng_state}
-    return xla::ShapeUtil::MakeTupleShape(
-        {output_shape, softmax_lse_shape, s_dmask_shape, rng_state_shape});
+        {batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded}));
   }
-  // {output, softmax_lse, rng_state}
-  return xla::ShapeUtil::MakeTupleShape(
-      {output_shape, softmax_lse_shape, rng_state_shape});
+  // {output, softmax_lse, rng_state, S_dmask*}
+  return xla::ShapeUtil::MakeTupleShape(result_shape);
 }
 
 FlashAttnForward::FlashAttnForward(
@@ -132,7 +138,7 @@ XlaOpVector FlashAttnForward::Lower(LoweringContext* loctx) const {
 
   const std::string& backend_config = GetFlashAttnBackendConfig(
       dropout_rate_, scale_, is_causal_, /*deterministic=*/true,
-      has_alibi_slopes_, max_seqlen_q_, max_seqlen_k_);
+      has_alibi_slopes_, max_seqlen_q_, max_seqlen_k_, return_softmax_);
 
   xla::XlaOp custom_call_result =
       xla::CustomCall(loctx->builder(), std::string(call_target_name),
@@ -141,10 +147,10 @@ XlaOpVector FlashAttnForward::Lower(LoweringContext* loctx) const {
   std::vector<xla::XlaOp> op_result = {
       xla::GetTupleElement(custom_call_result, 0),  // output
       xla::GetTupleElement(custom_call_result, 1),  // softmax_lse
-      xla::GetTupleElement(custom_call_result, 2),  // s_dmask or rng_state
+      xla::GetTupleElement(custom_call_result, 2),  // rng_state
   };
   if (return_softmax_) {
-    // rng_state
+    // s_dmask
     op_result.push_back(xla::GetTupleElement(custom_call_result, 3));
   }
   return ReturnOps(op_result, loctx);

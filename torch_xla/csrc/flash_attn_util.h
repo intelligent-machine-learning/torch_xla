@@ -11,9 +11,9 @@ namespace torch_xla {
 
 std::string GetFlashAttnBackendConfig(
     float dropout_rate, float scale, bool is_causal, bool deterministic,
-    bool has_alibi_slopes,
-    const std::optional<int>& max_seqlen_q = absl::nullopt,
-    const std::optional<int>& max_seqlen_k = absl::nullopt);
+    bool has_alibi_slopes, const std::optional<int>& max_seqlen_q,
+    const std::optional<int>& max_seqlen_k,
+    const std::optional<bool>& return_softmax = std::nullopt);
 
 void CheckFlashAttnFwdOperands(const XLATensorPtr& query,
                                const XLATensorPtr& key,

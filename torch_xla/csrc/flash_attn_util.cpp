@@ -6,11 +6,11 @@
 
 namespace torch_xla {
 
-std::string GetFlashAttnBackendConfig(float dropout_rate, float scale,
-                                      bool is_causal, bool deterministic,
-                                      bool has_alibi_slopes,
-                                      const std::optional<int>& max_seqlen_q,
-                                      const std::optional<int>& max_seqlen_k) {
+std::string GetFlashAttnBackendConfig(
+    float dropout_rate, float scale, bool is_causal, bool deterministic,
+    bool has_alibi_slopes, const std::optional<int>& max_seqlen_q,
+    const std::optional<int>& max_seqlen_k,
+    const std::optional<bool>& return_softmax) {
   using json = nlohmann::json;
   json flash_attn_backend_config = {
       {"dropout_rate", dropout_rate},
@@ -25,12 +25,10 @@ std::string GetFlashAttnBackendConfig(float dropout_rate, float scale,
     flash_attn_backend_config["max_seqlen_q"] = max_seqlen_q.value();
     flash_attn_backend_config["max_seqlen_k"] = max_seqlen_k.value();
   }
-  json backend_config = {
-      {"operation_queue_id", "0"},
-      {"wait_on_operation_queues", json::array()},
-      {"flash_attn_backend_config", flash_attn_backend_config},
-  };
-  return backend_config.dump();
+  if (return_softmax.has_value()) {
+    flash_attn_backend_config["return_softmax"] = return_softmax.value();
+  }
+  return flash_attn_backend_config.dump();
 }
 
 static void CheckFlashAttnCommonOperands(
