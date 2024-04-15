@@ -1045,7 +1045,8 @@ void InitXlaModuleBindings(py::module m) {
         if (return_softmax) {
           at::Tensor s_dmask =
               bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
-          result_tuple[3] = torch::autograd::make_variable(s_dmask, false);
+          result_tuple[3] =
+              torch::autograd::make_variable(s_dmask, query.requires_grad());
         }
         return result_tuple;
       },
@@ -1084,7 +1085,8 @@ void InitXlaModuleBindings(py::module m) {
         if (return_softmax) {
           at::Tensor s_dmask =
               bridge::AtenFromXlaTensor(std::move(std::get<3>(result_tensors)));
-          result_tuple[3] = torch::autograd::make_variable(s_dmask, false);
+          result_tuple[3] =
+              torch::autograd::make_variable(s_dmask, query.requires_grad());
         }
         return result_tuple;
       },
