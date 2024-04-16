@@ -193,3 +193,317 @@ class AllReduceSumLayer(torch.autograd.Function):
   @staticmethod
   def backward(ctx, grad_output):
     return xm.all_reduce(xm.REDUCE_SUM, grad_output)
+
+
+def _flash_attn_fwd(query,
+                    key,
+                    value,
+                    *,
+                    dropout_rate=0.0,
+                    scale=None,
+                    is_causal=False,
+                    alibi_slopes=None,
+                    return_softmax=False):
+  maybe_contiguous = lambda x: x.contiguous() if not x.is_contiguous() else x
+  query, key, value = [maybe_contiguous(x) for x in (query, key, value)]
+  return torch_xla._XLAC._xla_flash_attn_fwd(
+      query,
+      key,
+      value,
+      dropout_rate=dropout_rate,
+      scale=scale,
+      is_causal=is_causal,
+      alibi_slopes=alibi_slopes,
+      return_softmax=return_softmax)
+
+
+def _flash_attn_varlen_fwd(query,
+                           key,
+                           value,
+                           cu_seqlens_query,
+                           cu_seqlens_key,
+                           *,
+                           max_seqlen_q,
+                           max_seqlen_k,
+                           dropout_rate=0.0,
+                           scale=None,
+                           is_causal=False,
+                           alibi_slopes=None,
+                           return_softmax=False):
+  maybe_contiguous = lambda x: x.contiguous() if not x.is_contiguous() else x
+  query, key, value = [maybe_contiguous(x) for x in (query, key, value)]
+  return torch_xla._XLAC._xla_flash_attn_varlen_fwd(
+      query,
+      key,
+      value,
+      cu_seqlens_query,
+      cu_seqlens_key,
+      max_seqlen_q=max_seqlen_q,
+      max_seqlen_k=max_seqlen_k,
+      dropout_rate=dropout_rate,
+      scale=scale,
+      is_causal=is_causal,
+      alibi_slopes=alibi_slopes,
+      return_softmax=return_softmax)
+
+
+def _flash_attn_bwd(
+    grad_output,
+    query,
+    key,
+    value,
+    output,
+    softmax_lse,
+    rng_state,
+    *,
+    dropout_rate=0.0,
+    scale=None,
+    is_causal=False,
+    alibi_slopes=None,
+    deterministic=False,
+):
+  maybe_contiguous = lambda x: x.contiguous() if not x.is_contiguous() else x
+  grad_output, query, key, value, output, softmax_lse = [
+      maybe_contiguous(x)
+      for x in (grad_output, query, key, value, output, softmax_lse)
+  ]
+  grad_query, grad_key, grad_value, grad_softmax = torch_xla._XLAC._xla_flash_attn_bwd(
+      grad_output,
+      query,
+      key,
+      value,
+      output,
+      softmax_lse,
+      rng_state,
+      dropout_rate=dropout_rate,
+      scale=scale,
+      is_causal=is_causal,
+      alibi_slopes=alibi_slopes,
+      deterministic=deterministic,
+  )
+  return grad_query, grad_key, grad_value, grad_softmax
+
+
+def _flash_attn_varlen_bwd(
+    grad_output,
+    query,
+    key,
+    value,
+    output,
+    softmax_lse,
+    rng_state,
+    cu_seqlens_query,
+    cu_seqlens_key,
+    *,
+    max_seqlen_q,
+    max_seqlen_k,
+    dropout_rate=0.0,
+    scale=None,
+    is_causal=False,
+    alibi_slopes=None,
+    deterministic=False,
+):
+  maybe_contiguous = lambda x: x.contiguous() if not x.is_contiguous() else x
+  grad_output, query, key, value, output = [
+      maybe_contiguous(x) for x in (grad_output, query, key, value, output)
+  ]
+  grad_query, grad_key, grad_value, grad_softmax, = torch_xla._XLAC._xla_flash_attn_varlen_bwd(
+      grad_output,
+      query,
+      key,
+      value,
+      output,
+      softmax_lse,
+      rng_state,
+      cu_seqlens_query,
+      cu_seqlens_key,
+      max_seqlen_q=max_seqlen_q,
+      max_seqlen_k=max_seqlen_k,
+      dropout_rate=dropout_rate,
+      scale=scale,
+      is_causal=is_causal,
+      alibi_slopes=alibi_slopes,
+      deterministic=deterministic,
+  )
+  return grad_query, grad_key, grad_value, grad_softmax
+
+
+class FlashAttn(torch.autograd.Function):
+
+  @staticmethod
+  def forward(
+      ctx,
+      query,
+      key,
+      value,
+      dropout_rate,
+      scale,
+      is_causal,
+      alibi_slopes,
+      deterministic,
+      return_softmax,
+  ):
+    if scale is None:
+      scale = query.shape[-1]**(-0.5)
+    output, softmax_lse, rng_state, S_dmask = _flash_attn_fwd(
+        query,
+        key,
+        value,
+        dropout_rate=dropout_rate,
+        scale=scale,
+        is_causal=is_causal,
+        alibi_slopes=alibi_slopes,
+        return_softmax=return_softmax and dropout_rate > 0)
+    ctx.save_for_backward(query, key, value, output, softmax_lse, rng_state)
+    ctx.dropout_rate = dropout_rate
+    ctx.scale = scale
+    ctx.is_causal = is_causal
+    ctx.alibi_slopes = alibi_slopes
+    ctx.deterministic = deterministic
+    return output if not return_softmax else (output, softmax_lse, S_dmask)
+
+  @staticmethod
+  def backward(ctx, grad_output, *args):
+    query, key, value, output, softmax_lse, rng_state = ctx.saved_tensors
+    grad_query, grad_key, grad_value, _ = _flash_attn_bwd(
+        grad_output,
+        query,
+        key,
+        value,
+        output,
+        softmax_lse,
+        rng_state,
+        dropout_rate=ctx.dropout_rate,
+        scale=ctx.scale,
+        is_causal=ctx.is_causal,
+        alibi_slopes=ctx.alibi_slopes,
+        deterministic=ctx.deterministic,
+    )
+    return grad_query, grad_key, grad_value, None, None, None, None, None, None
+
+
+class FlashAttnVarLen(torch.autograd.Function):
+
+  @staticmethod
+  def forward(
+      ctx,
+      query,
+      key,
+      value,
+      cu_seqlens_query,
+      cu_seqlens_key,
+      max_seqlen_q,
+      max_seqlen_k,
+      dropout_rate,
+      scale,
+      is_causal,
+      alibi_slopes,
+      deterministic,
+      return_softmax,
+  ):
+    if scale is None:
+      scale = query.shape[-1]**(-0.5)
+    output, softmax_lse, rng_state, S_dmask = _flash_attn_varlen_fwd(
+        query,
+        key,
+        value,
+        cu_seqlens_query,
+        cu_seqlens_key,
+        max_seqlen_q=max_seqlen_q,
+        max_seqlen_k=max_seqlen_k,
+        dropout_rate=dropout_rate,
+        scale=scale,
+        is_causal=is_causal,
+        alibi_slopes=alibi_slopes,
+        return_softmax=return_softmax and dropout_rate > 0)
+    ctx.save_for_backward(query, key, value, cu_seqlens_query, cu_seqlens_key,
+                          output, softmax_lse, rng_state)
+    ctx.max_seqlen_q = max_seqlen_q
+    ctx.max_seqlen_k = max_seqlen_k
+    ctx.dropout_rate = dropout_rate
+    ctx.scale = scale
+    ctx.is_causal = is_causal
+    ctx.alibi_slopes = alibi_slopes
+    ctx.deterministic = deterministic
+    return output if not return_softmax else (output, softmax_lse, S_dmask)
+
+  @staticmethod
+  def backward(ctx, grad_output, *args):
+    query, key, value, cu_seqlens_query, cu_seqlens_key, output, softmax_lse, rng_state = ctx.saved_tensors
+    grad_query, grad_key, grad_value, _ = _flash_attn_varlen_bwd(
+        grad_output,
+        query,
+        key,
+        value,
+        output,
+        softmax_lse,
+        rng_state,
+        cu_seqlens_query,
+        cu_seqlens_key,
+        max_seqlen_q=ctx.max_seqlen_q,
+        max_seqlen_k=ctx.max_seqlen_k,
+        dropout_rate=ctx.dropout_rate,
+        scale=ctx.scale,
+        is_causal=ctx.is_causal,
+        alibi_slopes=ctx.alibi_slopes,
+        deterministic=ctx.deterministic,
+    )
+    return grad_query, grad_key, grad_value, None, None, None, None, None, None, None, None, None, None
+
+
+def flash_attn(
+    query,
+    key,
+    value,
+    *,
+    dropout_rate=0.0,
+    scale=None,
+    is_causal=False,
+    alibi_slopes=None,
+    deterministic=False,
+    return_softmax=False,
+):
+  return FlashAttn.apply(
+      query,
+      key,
+      value,
+      dropout_rate,
+      scale,
+      is_causal,
+      alibi_slopes,
+      deterministic,
+      return_softmax,
+  )
+
+
+def flash_attn_varlen(
+    query,
+    key,
+    value,
+    cu_seqlens_query,
+    cu_seqlens_key,
+    *,
+    max_seqlen_q,
+    max_seqlen_k,
+    dropout_rate=0.0,
+    scale=None,
+    is_causal=False,
+    alibi_slopes=None,
+    deterministic=False,
+    return_softmax=False,
+):
+  return FlashAttnVarLen.apply(
+      query,
+      key,
+      value,
+      cu_seqlens_query,
+      cu_seqlens_key,
+      max_seqlen_q,
+      max_seqlen_k,
+      dropout_rate,
+      scale,
+      is_causal,
+      alibi_slopes,
+      deterministic,
+      return_softmax,
+  )

@@ -184,6 +184,11 @@ const xla::Shape& GetXlaShape(const torch::lazy::Value& value) {
   return casted->xla_shape(value.index);
 }
 
+absl::optional<xla::Shape> GetOptionalXlaShape(
+    const absl::optional<torch::lazy::Value>& value) {
+  return value ? absl::make_optional(GetXlaShape(*value)) : absl::nullopt;
+}
+
 // The sharding hash is only based on relevant fields from the xla::OpSharding
 // object. We skip the field that's irrelevant, which is the layout.
 void XlaNode::UpdateShardingHash() {
