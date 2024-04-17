@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "absl/hash/hash.h"
+#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "torch_xla/csrc/runtime/types.h"
 #include "tsl/lib/gtl/inlined_vector.h"
@@ -179,6 +180,9 @@ inline std::ostream& operator<<(std::ostream& stream, const XlaNode& node) {
 }
 
 const xla::Shape& GetXlaShape(const torch::lazy::Value& value);
+
+absl::optional<xla::Shape> GetOptionalXlaShape(
+    const absl::optional<torch::lazy::Value>& value);
 
 template <typename T>
 T* NodeCast(const torch::lazy::Node* node, torch::lazy::OpKind op) {

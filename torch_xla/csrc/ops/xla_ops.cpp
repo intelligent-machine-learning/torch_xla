@@ -33,5 +33,6 @@ const OpKindWrapper xla_tensor_data("xla::tensor_data");
 const OpKindWrapper xla_unselect("xla::unselect");
 const OpKindWrapper xla_update_slice("xla::update_slice");
 const OpKindWrapper xla_custom_sharding("xla::custom_sharding");
-
+const OpKindWrapper xla_flash_attn_forward = "xla::flash_attn_forward";
+const OpKindWrapper xla_flash_attn_backward = "xla::flash_attn_backward";
 }  // namespace torch_xla
