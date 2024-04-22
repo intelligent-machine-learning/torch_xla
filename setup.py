@@ -37,6 +37,9 @@
 #   BAZEL_REMOTE_CACHE=""
 #     whether to use remote cache for builds
 #
+#   BAZEL_REMOTE_CACHE_ADDR="127.0.0.1:9092"
+#     using bazel-remote-cache with server host and port
+#
 #   TPUVM_MODE=0
 #     whether to build for TPU
 #
@@ -191,6 +194,21 @@ if build_mode not in ['clean']:
   # Copy libtpu.so into torch_xla/lib
   maybe_bundle_libtpu(base_dir)
 
+DEBUG = _check_env_flag('DEBUG')
+IS_DARWIN = (platform.system() == 'Darwin')
+IS_WINDOWS = sys.platform.startswith('win')
+IS_LINUX = (platform.system() == 'Linux')
+GCLOUD_KEY_FILE = os.getenv('GCLOUD_SERVICE_KEY_FILE', default='')
+CACHE_SILO_NAME = os.getenv('SILO_NAME', default='dev')
+BAZEL_JOBS = os.getenv('BAZEL_JOBS', default='')
+BAZEL_REMOTE_CACHE_ADDR = os.getenv('BAZEL_REMOTE_CACHE_ADDR', default='')
+
+extra_compile_args = []
+cxx_abi = os.getenv(
+    'CXX_ABI', default='') or getattr(torch._C, '_GLIBCXX_USE_CXX11_ABI', None)
+if cxx_abi is not None:
+  extra_compile_args.append(f'-D_GLIBCXX_USE_CXX11_ABI={int(cxx_abi)}')
+
 
 class BazelExtension(Extension):
   """A C/C++ extension that is defined as a Bazel BUILD target."""
@@ -222,6 +240,52 @@ class BuildBazelExtension(build_ext.build_ext):
         'bazel', 'build', ext.bazel_target,
         f"--symlink_prefix={os.path.join(self.build_temp, 'bazel-')}"
     ]
+    for opt in extra_compile_args:
+      bazel_argv.append("--cxxopt={}".format(opt))
+
+    # Debug build.
+    if DEBUG:
+      bazel_argv.append('--config=dbg')
+
+    if _check_env_flag('TPUVM_MODE'):
+      bazel_argv.append('--config=tpu')
+
+    # Remote cache authentication.
+    if GCLOUD_KEY_FILE:
+      # Temporary workaround to allow PRs from forked repo to run CI. See details at (#5259).
+      # TODO: Remove the check once self-hosted GHA workers are available to CPU/GPU CI.
+      gclout_key_file_size = os.path.getsize(GCLOUD_KEY_FILE)
+      if gclout_key_file_size > 1:
+        bazel_argv.append('--google_credentials=%s' % GCLOUD_KEY_FILE)
+        bazel_argv.append('--config=remote_cache')
+    else:
+      if _check_env_flag('BAZEL_REMOTE_CACHE'):
+        bazel_argv.append('--config=remote_cache')
+      elif BAZEL_REMOTE_CACHE_ADDR:
+        bazel_argv.append('--config=remote_cache')
+        bazel_argv.append('--remote_cache=grpc://%s' % BAZEL_REMOTE_CACHE_ADDR)
+    if CACHE_SILO_NAME:
+      bazel_argv.append('--remote_default_exec_properties=cache-silo-key=%s' %
+                        CACHE_SILO_NAME)
+
+    if _check_env_flag('BUILD_CPP_TESTS', default='0'):
+      bazel_argv.append('//test/cpp:all')
+      bazel_argv.append('//torch_xla/csrc/runtime:all')
+
+    if BAZEL_JOBS:
+      bazel_argv.append('--jobs=%s' % BAZEL_JOBS)
+
+    # Build configuration.
+    if _check_env_flag('BAZEL_VERBOSE'):
+      bazel_argv.append('-s')
+    if _check_env_flag('XLA_CUDA'):
+      bazel_argv.append('--config=cuda')
+    if _check_env_flag('XLA_CPU_USE_ACL'):
+      bazel_argv.append('--config=acl')
+
+    if IS_WINDOWS:
+      for library_dir in self.library_dirs:
+        bazel_argv.append('--linkopt=/LIBPATH:' + library_dir)
 
     import torch
     cxx_abi = os.getenv('CXX_ABI') or getattr(torch._C,
