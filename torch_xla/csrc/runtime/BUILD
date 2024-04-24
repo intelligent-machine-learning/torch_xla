@@ -116,6 +116,7 @@ cc_library(
         ":tf_logging",
         ":xla_coordinator",
         "//torch_xla/csrc:thread_pool",
+        "//torch_xla/csrc:common",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/types:span",

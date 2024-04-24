@@ -56,11 +56,13 @@ import contextlib
 import distutils.ccompiler
 import distutils.command.clean
 import os
+import platform
 import requests
 import shutil
 import subprocess
 import sys
 import tempfile
+import torch
 import zipfile
 
 import build_util
@@ -78,6 +80,8 @@ def _get_build_mode():
     if not sys.argv[i].startswith('-'):
       return sys.argv[i]
 
+def _check_env_flag(name, default=''):
+  return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
 
 def get_git_head_sha(base_dir):
   xla_git_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'],
@@ -264,9 +268,6 @@ class BuildBazelExtension(build_ext.build_ext):
       elif BAZEL_REMOTE_CACHE_ADDR:
         bazel_argv.append('--config=remote_cache')
         bazel_argv.append('--remote_cache=grpc://%s' % BAZEL_REMOTE_CACHE_ADDR)
-    if CACHE_SILO_NAME:
-      bazel_argv.append('--remote_default_exec_properties=cache-silo-key=%s' %
-                        CACHE_SILO_NAME)
 
     if _check_env_flag('BUILD_CPP_TESTS', default='0'):
       bazel_argv.append('//test/cpp:all')

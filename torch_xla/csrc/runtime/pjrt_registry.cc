@@ -46,8 +46,8 @@ xla::GpuAllocatorConfig GetGpuAllocatorConfig() {
   allocator_config.memory_fraction =
       sys_util::GetEnvDouble("XLA_GPU_MEMORY_FRACTION", 0.9);
   allocator_config.preallocate = sys_util::GetEnvBool("XLA_GPU_MEMORY_PREALLOCATE", true);
-  allocator_config.garbage_collection =
-      sys_util::GetEnvBool("XLA_GPU_MEMORY_GARBAGE_COLLECTION", false);
+  // allocator_config.garbage_collection =
+  //     sys_util::GetEnvBool("XLA_GPU_MEMORY_GARBAGE_COLLECTION", false);
   return allocator_config;
 }
 
