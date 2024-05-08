@@ -14,6 +14,7 @@
 #include "torch_xla/csrc/aten_xla_bridge.h"
 #include "torch_xla/csrc/data_ops.h"
 #include "torch_xla/csrc/dtype.h"
+#include "torch_xla/csrc/flash_attn_util.h"
 #include "torch_xla/csrc/helpers.h"
 #include "torch_xla/csrc/layout_manager.h"
 #include "torch_xla/csrc/lowering_context.h"
@@ -52,6 +53,8 @@
 #include "torch_xla/csrc/ops/expand.h"
 #include "torch_xla/csrc/ops/expand_symint.h"
 #include "torch_xla/csrc/ops/exponential.h"
+#include "torch_xla/csrc/ops/flash_attn_backward.h"
+#include "torch_xla/csrc/ops/flash_attn_forward.h"
 #include "torch_xla/csrc/ops/flip.h"
 #include "torch_xla/csrc/ops/gather.h"
 #include "torch_xla/csrc/ops/generic.h"
@@ -1350,6 +1353,132 @@ void fill_(XLATensorPtr& input, const at::Scalar& value) {
       value, input->shape(), sym_int_elements, c10::nullopt,
       input->GetDevice());
   input->SetInPlaceIrValue(std::move(constant));
+}
+
+static std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_fwd_internal(const XLATensorPtr& query, const XLATensorPtr& key,
+                        const XLATensorPtr& value,
+                        const XLATensorPtr& cu_seqlens_query,
+                        const XLATensorPtr& cu_seqlens_key,
+                        std::optional<int> max_seqlen_q,
+                        std::optional<int> max_seqlen_k, float dropout_rate,
+                        float scale, bool is_causal,
+                        const XLATensorPtr& alibi_slopes, bool return_softmax) {
+  bool is_varlen = bool(cu_seqlens_query);
+  XLA_CHECK(is_varlen == bool(cu_seqlens_key) &&
+            is_varlen == max_seqlen_q.has_value() &&
+            is_varlen == max_seqlen_k.has_value());
+  CheckFlashAttnFwdOperands(query, key, value, is_varlen, alibi_slopes);
+
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<FlashAttnForward>(
+      query->GetIrValue(), key->GetIrValue(), value->GetIrValue(),
+      GetOptionalIrValue(cu_seqlens_query), GetOptionalIrValue(cu_seqlens_key),
+      max_seqlen_q, max_seqlen_k, dropout_rate, scale, is_causal,
+      GetOptionalIrValue(alibi_slopes), return_softmax);
+
+  const auto& device = query->GetDevice();
+
+  XLATensorPtr output = XLATensor::Create(torch::lazy::Value(node, 0), device);
+  XLATensorPtr softmax_lse =
+      XLATensor::Create(torch::lazy::Value(node, 1), device);
+  XLATensorPtr rng_state =
+      XLATensor::Create(torch::lazy::Value(node, 2), device);
+  XLATensorPtr s_dmask =
+      return_softmax ? XLATensor::Create(torch::lazy::Value(node, 3), device)
+                     : XLATensorPtr();
+  return std::make_tuple(output, softmax_lse, rng_state, s_dmask);
+}
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_fwd(const XLATensorPtr& query, const XLATensorPtr& key,
+               const XLATensorPtr& value, float dropout_rate, float scale,
+               bool is_causal, const XLATensorPtr& alibi_slopes,
+               bool return_softmax) {
+  return flash_attn_fwd_internal(query, key, value, XLATensorPtr(),
+                                 XLATensorPtr(), std::nullopt, std::nullopt,
+                                 dropout_rate, scale, is_causal, alibi_slopes,
+                                 return_softmax);
+}
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_varlen_fwd(const XLATensorPtr& query, const XLATensorPtr& key,
+                      const XLATensorPtr& value,
+                      const XLATensorPtr& cu_seqlens_query,
+                      const XLATensorPtr& cu_seqlens_key, int max_seqlen_q,
+                      int max_seqlen_k, float dropout_rate, float scale,
+                      bool is_causal, const XLATensorPtr& alibi_slopes,
+                      bool return_softmax) {
+  return flash_attn_fwd_internal(query, key, value, cu_seqlens_query,
+                                 cu_seqlens_key, max_seqlen_q, max_seqlen_k,
+                                 dropout_rate, scale, is_causal, alibi_slopes,
+                                 return_softmax);
+}
+
+static std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_bwd_internal(
+    const XLATensorPtr& grad_output, const XLATensorPtr& query,
+    const XLATensorPtr& key, const XLATensorPtr& value,
+    const XLATensorPtr& output, const XLATensorPtr& softmax_lse,
+    const XLATensorPtr& rng_state, const XLATensorPtr& cu_seqlens_query,
+    const XLATensorPtr& cu_seqlens_key, std::optional<int> max_seqlen_q,
+    std::optional<int> max_seqlen_k, float dropout_rate, float scale,
+    bool is_causal, const XLATensorPtr& alibi_slopes, bool deterministic) {
+  bool is_varlen = bool(cu_seqlens_query);
+  XLA_CHECK(is_varlen == bool(cu_seqlens_key) &&
+            is_varlen == max_seqlen_q.has_value() &&
+            is_varlen == max_seqlen_k.has_value());
+  CheckFlashAttnBwdOperands(grad_output, query, key, value, output, softmax_lse,
+                            rng_state, is_varlen, alibi_slopes);
+
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<FlashAttnBackward>(
+      grad_output->GetIrValue(), query->GetIrValue(), key->GetIrValue(),
+      value->GetIrValue(), output->GetIrValue(), softmax_lse->GetIrValue(),
+      rng_state->GetIrValue(), GetOptionalIrValue(cu_seqlens_query),
+      GetOptionalIrValue(cu_seqlens_key), max_seqlen_q, max_seqlen_k,
+      dropout_rate, scale, is_causal, GetOptionalIrValue(alibi_slopes),
+      deterministic);
+
+  const auto& device = query->GetDevice();
+
+  XLATensorPtr grad_query =
+      XLATensor::Create(torch::lazy::Value(node, 0), device);
+  XLATensorPtr grad_key =
+      XLATensor::Create(torch::lazy::Value(node, 1), device);
+  XLATensorPtr grad_value =
+      XLATensor::Create(torch::lazy::Value(node, 2), device);
+  XLATensorPtr grad_softmax =
+      XLATensor::Create(torch::lazy::Value(node, 3), device);
+  return std::make_tuple(grad_query, grad_key, grad_value, grad_softmax);
+}
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_bwd(const XLATensorPtr& grad_output, const XLATensorPtr& query,
+               const XLATensorPtr& key, const XLATensorPtr& value,
+               const XLATensorPtr& output, const XLATensorPtr& softmax_lse,
+               const XLATensorPtr& rng_state, float dropout_rate, float scale,
+               bool is_causal, const XLATensorPtr& alibi_slopes,
+               bool deterministic) {
+  return flash_attn_bwd_internal(
+      grad_output, query, key, value, output, softmax_lse, rng_state,
+      XLATensorPtr(), XLATensorPtr(), std::nullopt, std::nullopt, dropout_rate,
+      scale, is_causal, alibi_slopes, deterministic);
+}
+
+std::tuple<XLATensorPtr, XLATensorPtr, XLATensorPtr, XLATensorPtr>
+flash_attn_varlen_bwd(const XLATensorPtr& grad_output,
+                      const XLATensorPtr& query, const XLATensorPtr& key,
+                      const XLATensorPtr& value, const XLATensorPtr& output,
+                      const XLATensorPtr& softmax_lse,
+                      const XLATensorPtr& rng_state,
+                      const XLATensorPtr& cu_seqlens_query,
+                      const XLATensorPtr& cu_seqlens_key, int max_seqlen_q,
+                      int max_seqlen_k, float dropout_rate, float scale,
+                      bool is_causal, const XLATensorPtr& alibi_slopes,
+                      bool deterministic) {
+  return flash_attn_bwd_internal(
+      grad_output, query, key, value, output, softmax_lse, rng_state,
+      cu_seqlens_query, cu_seqlens_key, max_seqlen_q, max_seqlen_k,
+      dropout_rate, scale, is_causal, alibi_slopes, deterministic);
 }
 
 XLATensorPtr flip(const XLATensorPtr& input, absl::Span<const int64_t> dims) {
